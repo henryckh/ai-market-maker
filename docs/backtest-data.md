@@ -16,18 +16,18 @@ uv run python -m backtest.bootstrap_showcase
 
 ## Default desk combo (`macro_tilt`)
 
-`config/deploy.active.json` — agents **2.3** (TA), **2.1** (pattern), **1.1** (macro).
+`config/deploy.active.json` — `technical_ta_engine`, `pattern_recognition_bot`, `monetary_sentinel`.
 
 All three work in backtest without live Nexus:
 
-- **2.3 / 2.1** — OHLCV + TA-Lib Tier-0
-- **1.1** — OHLCV window return/vol → synthetic `market_overview` (no look-ahead)
+- **technical_ta_engine / pattern_recognition_bot** — OHLCV + TA-Lib Tier-0
+- **monetary_sentinel** — OHLCV window return/vol → synthetic `market_overview` (no look-ahead)
 
 Set `AIMM_BACKTEST_OHLCV_NEXUS=0` to disable synthetic Nexus context.
 
 ## Nexus-heavy agents (later PR)
 
-Agents **1.2** (news), **2.2** (stat arb), **3.x** (sentiment), **4.x** (flow) need feeds that are not reconstructible from OHLCV alone.
+Agents `news_narrative_miner`, `statistical_alpha_engine`, `retail_hype_tracker`, `pro_bias_analyst`, `whale_behavior_analyst`, `liquidity_order_flow` need feeds that are not reconstructible from OHLCV alone. Omit them from deploy JSON so they are not added to the graph.
 
 **Recommended path (not blocking showcase):**
 
@@ -39,9 +39,9 @@ Do not wire live Nexus per bar in backtest — it would inject look-ahead (today
 
 ## OHLCV-only two-desk mode
 
-For fastest smoke tests: `config/deploy.ohlcv_only.json` (2.3 + 2.1 only).
+For fastest smoke tests: `config/deploy.ohlcv_only.json` (technical_ta_engine + pattern_recognition_bot only).
 
 ```bash
-AIMM_LLM_AGENTS=2.3,2.1 uv run python -m backtest.run_demo \
+uv run python -m backtest.run_demo \
   --deploy config/deploy.ohlcv_only.json --ticker-only --steps 20 --csv-only
 ```

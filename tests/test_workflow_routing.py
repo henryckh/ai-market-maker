@@ -35,22 +35,23 @@ def test_workflow_compiles():
 
 
 def test_tier1_parallel_fanout_and_fanin_edges_present():
-    g = build_workflow()
+    from agents.registry import get_registry
+
+    names = get_registry().names()
+    g = build_workflow(tier0_nodes=names)
     edges = g.edges
-    tier0 = {
-        "monetary_sentinel",
-        "news_narrative_miner",
-        "pattern_recognition_bot",
-        "statistical_alpha_engine",
-        "technical_ta_engine",
-        "retail_hype_tracker",
-        "pro_bias_analyst",
-        "whale_behavior_analyst",
-        "liquidity_order_flow",
-    }
-    for node in tier0:
+    for node in names:
         assert ("desk_market_scan", node) in edges
         assert (node, "desk_risk") in edges
+
+
+def test_workflow_prunes_disabled_desks():
+    g = build_workflow(tier0_nodes=["technical_ta_engine", "pattern_recognition_bot"])
+    edges = g.edges
+    assert ("desk_market_scan", "technical_ta_engine") in edges
+    assert ("desk_market_scan", "pattern_recognition_bot") in edges
+    assert ("desk_market_scan", "news_narrative_miner") not in edges
+    assert ("desk_market_scan", "whale_behavior_analyst") not in edges
 
 
 def test_tier2_risk_to_arbitrator_edge_present():

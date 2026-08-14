@@ -21,6 +21,11 @@ def test_parse_json_object_preamble_and_trailing_text() -> None:
     assert parse_json_object(txt) == {"a": 1}
 
 
+def test_parse_json_object_think_wrapper() -> None:
+    txt = '<think>let me reason</think>\n{"ta_indicators": {"rsi": 61}}'
+    assert parse_json_object(txt) == {"ta_indicators": {"rsi": 61}}
+
+
 def test_parse_json_object_non_object_returns_none() -> None:
     assert parse_json_object("[1,2,3]") is None
     assert parse_json_object("null") is None

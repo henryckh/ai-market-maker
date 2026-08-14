@@ -20,7 +20,7 @@ def _ta_metric_rows() -> list[dict[str, Any]]:
     return [
         {
             "metric_id": f"ta_{name}",
-            "tier0_agent": "2.3",
+            "tier0_agent": "technical_ta_engine",
             "contract_path": f"ta_indicators.{name}",
             "family": "technical",
         }
@@ -30,29 +30,65 @@ def _ta_metric_rows() -> list[dict[str, Any]]:
 
 # Non-TA metrics resolved in ``tier1.resolvers.resolve_metric``.
 CORE_METRICS: tuple[dict[str, Any], ...] = (
-    {"metric_id": "circuit_breaker_status", "tier0_agent": "1.2", "family": "macro_news"},
-    {"metric_id": "black_swan_news", "tier0_agent": "1.2", "family": "macro_news"},
-    {"metric_id": "mon_liquidity_score", "tier0_agent": "1.1", "family": "macro"},
-    {"metric_id": "mon_macro_regime_state", "tier0_agent": "1.1", "family": "macro"},
-    {"metric_id": "news_impact", "tier0_agent": "1.2", "family": "macro_news"},
-    {"metric_id": "news_event_type", "tier0_agent": "1.2", "family": "macro_news"},
-    {"metric_id": "pattern_setup", "tier0_agent": "2.1", "family": "structure"},
-    {"metric_id": "pattern_name", "tier0_agent": "2.1", "family": "structure"},
-    {"metric_id": "alpha_z", "tier0_agent": "2.2", "family": "quant"},
-    {"metric_id": "alpha_signal_label", "tier0_agent": "2.2", "family": "quant"},
-    {"metric_id": "alpha_strong_buy", "tier0_agent": "2.2", "family": "quant"},
-    {"metric_id": "alpha_strong_sell", "tier0_agent": "2.2", "family": "quant"},
-    {"metric_id": "factor_confluence", "tier0_agent": "2.2", "family": "quant"},
-    {"metric_id": "retail_fomo", "tier0_agent": "3.1", "family": "behavioral"},
-    {"metric_id": "retail_div", "tier0_agent": "3.1", "family": "behavioral"},
-    {"metric_id": "retail_sent_z", "tier0_agent": "3.1", "family": "behavioral"},
-    {"metric_id": "pro_bias", "tier0_agent": "3.2", "family": "flow"},
-    {"metric_id": "pro_etf_trend", "tier0_agent": "3.2", "family": "flow"},
-    {"metric_id": "whale_dump_prob", "tier0_agent": "4.1", "family": "microstructure"},
-    {"metric_id": "whale_sell_pressure", "tier0_agent": "4.1", "family": "microstructure"},
-    {"metric_id": "liq_slippage", "tier0_agent": "4.2", "family": "microstructure"},
-    {"metric_id": "liq_imbalance", "tier0_agent": "4.2", "family": "microstructure"},
-    {"metric_id": "liq_poc_price", "tier0_agent": "4.2", "family": "microstructure"},
+    {
+        "metric_id": "circuit_breaker_status",
+        "tier0_agent": "news_narrative_miner",
+        "family": "macro_news",
+    },
+    {"metric_id": "black_swan_news", "tier0_agent": "news_narrative_miner", "family": "macro_news"},
+    {"metric_id": "mon_liquidity_score", "tier0_agent": "monetary_sentinel", "family": "macro"},
+    {"metric_id": "mon_macro_regime_state", "tier0_agent": "monetary_sentinel", "family": "macro"},
+    {"metric_id": "news_impact", "tier0_agent": "news_narrative_miner", "family": "macro_news"},
+    {"metric_id": "news_event_type", "tier0_agent": "news_narrative_miner", "family": "macro_news"},
+    {"metric_id": "pattern_setup", "tier0_agent": "pattern_recognition_bot", "family": "structure"},
+    {"metric_id": "pattern_name", "tier0_agent": "pattern_recognition_bot", "family": "structure"},
+    {"metric_id": "alpha_z", "tier0_agent": "statistical_alpha_engine", "family": "quant"},
+    {
+        "metric_id": "alpha_signal_label",
+        "tier0_agent": "statistical_alpha_engine",
+        "family": "quant",
+    },
+    {"metric_id": "alpha_strong_buy", "tier0_agent": "statistical_alpha_engine", "family": "quant"},
+    {
+        "metric_id": "alpha_strong_sell",
+        "tier0_agent": "statistical_alpha_engine",
+        "family": "quant",
+    },
+    {
+        "metric_id": "factor_confluence",
+        "tier0_agent": "statistical_alpha_engine",
+        "family": "quant",
+    },
+    {"metric_id": "retail_fomo", "tier0_agent": "retail_hype_tracker", "family": "behavioral"},
+    {"metric_id": "retail_div", "tier0_agent": "retail_hype_tracker", "family": "behavioral"},
+    {"metric_id": "retail_sent_z", "tier0_agent": "retail_hype_tracker", "family": "behavioral"},
+    {"metric_id": "pro_bias", "tier0_agent": "pro_bias_analyst", "family": "flow"},
+    {"metric_id": "pro_etf_trend", "tier0_agent": "pro_bias_analyst", "family": "flow"},
+    {
+        "metric_id": "whale_dump_prob",
+        "tier0_agent": "whale_behavior_analyst",
+        "family": "microstructure",
+    },
+    {
+        "metric_id": "whale_sell_pressure",
+        "tier0_agent": "whale_behavior_analyst",
+        "family": "microstructure",
+    },
+    {
+        "metric_id": "liq_slippage",
+        "tier0_agent": "liquidity_order_flow",
+        "family": "microstructure",
+    },
+    {
+        "metric_id": "liq_imbalance",
+        "tier0_agent": "liquidity_order_flow",
+        "family": "microstructure",
+    },
+    {
+        "metric_id": "liq_poc_price",
+        "tier0_agent": "liquidity_order_flow",
+        "family": "microstructure",
+    },
 )
 
 

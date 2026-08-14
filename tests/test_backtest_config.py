@@ -11,6 +11,7 @@ import pytest
 
 from backtest.config import (
     ARBITRATOR_AGENT_LLM,
+    ARBITRATOR_WEIGHTED_CONVERGENCE,
     resolve_backtest_config,
     resolve_tp_sl_pct,
     set_env_from_config,
@@ -25,7 +26,6 @@ def _sample_deploy_config(
     lev: float = 5.0,
 ) -> dict:
     return {
-        "effective_weights": {"agent_1": 0.15, "agent_2": 0.2},
         "execution": {
             "arbitrator_mode": mode,
             "take_profit_pct": tp,
@@ -33,17 +33,24 @@ def _sample_deploy_config(
             "leverage": lev,
         },
         "profile": {"profile_id": "test-profile-v1"},
-        "agents": {},
+        "agents": {
+            "technical_ta_engine": {"weight": 0.15, "enabled": True},
+            "pattern_recognition_bot": {"weight": 0.2, "enabled": True},
+        },
     }
 
 
 class TestResolveBacktestConfig:
     def test_defaults(self):
         cfg = resolve_backtest_config(deploy_path="/nonexistent/aimm-deploy-missing.json")
-        assert cfg["arbitrator_mode"] == ARBITRATOR_AGENT_LLM
-        assert cfg["use_llm"] is True
+        assert cfg["arbitrator_mode"] == ARBITRATOR_WEIGHTED_CONVERGENCE
+        assert cfg["use_llm"] is False
         assert cfg["deploy_loaded"] is False
-        assert cfg["profile_weights"] == {"2.3": 0.55, "2.1": 0.15, "1.1": 0.25}
+        assert cfg["profile_weights"] == {
+            "technical_ta_engine": 0.55,
+            "pattern_recognition_bot": 0.15,
+            "monetary_sentinel": 0.25,
+        }
         assert cfg["profile_id"] == "macro_tilt"
         assert cfg["allows_short"] is True
         assert cfg["decision_threshold"]["ta_led"]["enabled"] is True
@@ -56,7 +63,11 @@ class TestResolveBacktestConfig:
         cfg = resolve_backtest_config(deploy_path=str(deploy))
         assert cfg["deploy_loaded"] is True
         assert cfg["profile_id"] == "macro_tilt"
-        assert cfg["profile_weights"] == {"2.3": 0.55, "2.1": 0.15, "1.1": 0.25}
+        assert cfg["profile_weights"] == {
+            "technical_ta_engine": 0.55,
+            "pattern_recognition_bot": 0.15,
+            "monetary_sentinel": 0.25,
+        }
         assert cfg["leverage"] == 2.0
 
     def test_deploy_config_loaded(self):
@@ -71,7 +82,10 @@ class TestResolveBacktestConfig:
             assert cfg["stop_loss_pct"] == 5.0
             assert cfg["leverage"] == 5.0
             assert cfg["profile_id"] == "test-profile-v1"
-            assert cfg["profile_weights"] == {"agent_1": 0.15, "agent_2": 0.2}
+            assert cfg["profile_weights"] == {
+                "technical_ta_engine": 0.15,
+                "pattern_recognition_bot": 0.2,
+            }
 
     def test_cli_override_wins_over_deploy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,26 +96,25 @@ class TestResolveBacktestConfig:
                 cli_arbitrator_mode="weighted_convergence",
                 cli_tp_sl_pct=3.0,
             )
-            assert cfg["arbitrator_mode"] == ARBITRATOR_AGENT_LLM
-            assert cfg["use_llm"] is True
+            assert cfg["arbitrator_mode"] == ARBITRATOR_WEIGHTED_CONVERGENCE
+            assert cfg["use_llm"] is False
             assert cfg["take_profit_pct"] == 3.0
             assert cfg["stop_loss_pct"] == 3.0
             assert cfg["deploy_loaded"] is True
 
-    def test_env_arbitrator_mode(self):
-        cfg = resolve_backtest_config(env={"AIMM_ARBITRATOR_MODE": "agent_llm"})
-        assert cfg["arbitrator_mode"] == ARBITRATOR_AGENT_LLM
-        assert cfg["use_llm"] is True
-
-    def test_env_use_llm(self):
-        cfg = resolve_backtest_config(env={"AI_MARKET_MAKER_USE_LLM": "1"})
-        assert cfg["arbitrator_mode"] == ARBITRATOR_AGENT_LLM
-        assert cfg["use_llm"] is True
+    def test_env_strategy_flags_ignored(self):
+        cfg = resolve_backtest_config(
+            deploy_path="/nonexistent/deploy.json",
+            env={"AIMM_ARBITRATOR_MODE": "agent_llm", "AI_MARKET_MAKER_USE_LLM": "1"},
+        )
+        assert cfg["deploy_loaded"] is False
+        assert cfg["arbitrator_mode"] == ARBITRATOR_WEIGHTED_CONVERGENCE
+        assert cfg["use_llm"] is False
 
     def test_deploy_no_file_fallback(self):
         cfg = resolve_backtest_config(deploy_path="/nonexistent/deploy.json")
         assert cfg["deploy_loaded"] is False
-        assert cfg["arbitrator_mode"] == ARBITRATOR_AGENT_LLM
+        assert cfg["arbitrator_mode"] == ARBITRATOR_WEIGHTED_CONVERGENCE
 
     def test_cli_leverage(self):
         cfg = resolve_backtest_config(
@@ -123,9 +136,11 @@ class TestResolveBacktestConfig:
             deploy_path.write_text(
                 json.dumps(
                     {
-                        "effective_weights": {"2.3": 1.0},
                         "execution": {"arbitrator_mode": "agent_llm", "leverage": 2.0},
                         "profile": {"profile_id": "no-tp-sl"},
+                        "agents": {
+                            "technical_ta_engine": {"weight": 1.0, "enabled": True},
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -178,17 +193,21 @@ class TestResolveTpSlPct:
 
 
 class TestSetEnvFromConfig:
-    def test_sets_agent_llm_env(self):
+    def test_clears_strategy_env(self):
+        os.environ["AIMM_ARBITRATOR_MODE"] = "agent_llm"
+        os.environ["AIMM_LLM_AGENTS"] = "technical_ta_engine"
         cfg = resolve_backtest_config(cli_arbitrator_mode="agent_llm")
         set_env_from_config(cfg)
-        assert os.environ.get("AIMM_ARBITRATOR_MODE") == "agent_llm"
-        assert os.environ.get("AI_MARKET_MAKER_USE_LLM") is None
-        assert os.environ.get("AIMM_LLM_MODE") is None
+        assert os.environ.get("AIMM_ARBITRATOR_MODE") is None
+        assert os.environ.get("AIMM_LLM_AGENTS") is None
+        assert os.environ.get("MODE") == "backtest"
 
-    def test_weighted_convergence_upgrades_to_agent_llm(self):
+    def test_weighted_cli_preserved_in_cfg(self):
         cfg = resolve_backtest_config(cli_arbitrator_mode="weighted_convergence")
+        assert cfg["arbitrator_mode"] == ARBITRATOR_WEIGHTED_CONVERGENCE
+        assert cfg["use_llm"] is False
         set_env_from_config(cfg)
-        assert os.environ.get("AIMM_ARBITRATOR_MODE") == "agent_llm"
+        assert os.environ.get("AIMM_ARBITRATOR_MODE") is None
 
     def test_deploy_active_signal(self):
         cfg = resolve_backtest_config(deploy_path="/nonexistent")
@@ -201,6 +220,7 @@ class TestSetEnvFromConfig:
         os.environ.pop("AIMM_DEPLOY_ACTIVE", None)
         os.environ.pop("AI_MARKET_MAKER_USE_LLM", None)
         os.environ.pop("AIMM_LLM_MODE", None)
+        os.environ.pop("AIMM_LLM_AGENTS", None)
 
 
 class TestLoopResolvedConfigStamp:

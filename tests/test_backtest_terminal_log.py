@@ -18,17 +18,21 @@ def test_print_bar_decision_includes_cot(monkeypatch):
     configure_backtest_terminal_logging()
     buf = io.StringIO()
     wf = {
-        "profile_weights": {"2.3": 0.55, "2.1": 0.15, "1.1": 0.25},
+        "profile_weights": {
+            "technical_ta_engine": 0.55,
+            "pattern_recognition_bot": 0.15,
+            "monetary_sentinel": 0.25,
+        },
         "tier0_contracts": [
             {
-                "agent_id": "2.3",
+                "agent_id": "technical_ta_engine",
                 "label": "Technical TA Engine",
                 "composite": 61.2,
                 "stance": "bullish",
                 "source": "agent_llm",
                 "reasoning": "RSI neutral; MACD histogram turning positive.",
             },
-            {"agent_id": "4.2", "status": "skipped", "source": None},
+            {"agent_id": "liquidity_order_flow", "status": "skipped", "source": None},
         ],
         "arbitration_result": {"composite": 58.0, "confidence": 0.68, "stance": "bullish"},
         "trade_intent": {"action": "BUY", "confidence": 0.68},
@@ -49,9 +53,9 @@ def test_print_bar_decision_includes_cot(monkeypatch):
     text = buf.getvalue()
     assert "Bar   10/90" in text
     assert "BTC/USDT" in text
-    assert "2.3" in text
+    assert "technical_ta_engine" in text
     assert "MACD histogram" in text
-    assert "4.2" not in text
+    assert "liquidity_order_flow" not in text
     assert "Desk deliberation" in text
     assert "Decision: BUY" in text
     assert "equity $10,842.00" in text
@@ -65,10 +69,10 @@ def test_print_bar_enriches_scores_from_reasoning_logs(monkeypatch):
     configure_backtest_terminal_logging()
     buf = io.StringIO()
     wf = {
-        "profile_weights": {"2.3": 0.55, "1.1": 0.25},
+        "profile_weights": {"technical_ta_engine": 0.55, "monetary_sentinel": 0.25},
         "tier0_contracts": [
             {
-                "agent_id": "2.3",
+                "agent_id": "technical_ta_engine",
                 "label": "Technical TA Engine",
                 "source": "agent_llm",
                 "reasoning": "RSI at 51; MACD hist positive.",
@@ -77,7 +81,7 @@ def test_print_bar_enriches_scores_from_reasoning_logs(monkeypatch):
         "reasoning_logs": [
             {
                 "node": "weighted_arbitrator",
-                "extra": {"agent_id": "2.3"},
+                "extra": {"agent_id": "technical_ta_engine"},
                 "decision": {"composite": 0.57, "confidence": 0.64, "stance": "bullish"},
             }
         ],
@@ -100,6 +104,29 @@ def test_print_bar_enriches_scores_from_reasoning_logs(monkeypatch):
     assert "▲ bullish" in text
     assert "MACD hist" in text
     assert "desks neutral" in text or "TA-led" in text or "composite gates" in text
+
+
+def test_print_bar_hold_still_logs(monkeypatch):
+    monkeypatch.setenv("MODE", "backtest")
+    monkeypatch.setenv("AIMM_BACKTEST_TERMINAL_LOG", "1")
+    configure_backtest_terminal_logging()
+    buf = io.StringIO()
+    print_bar_decision(
+        bar_index=51,
+        total_bars=80,
+        symbol="BTC/USDT",
+        close=59577.0,
+        ts_ms=1_783_036_800_000,
+        wf_output={
+            "arbitration_result": {"composite": 0.4, "confidence": 0.05, "stance": "neutral"}
+        },
+        action="HOLD",
+        confidence=0.05,
+        equity=10_000.0,
+        stream=buf,
+    )
+    assert "Bar   51/80" in buf.getvalue()
+    assert "Decision: HOLD" in buf.getvalue()
 
 
 def test_terminal_log_disabled(monkeypatch):

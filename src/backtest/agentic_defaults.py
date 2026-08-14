@@ -8,9 +8,9 @@ from typing import Any
 # macro_tilt preset (run_agentic_sweep): TA-led desk + macro/pattern support.
 DEFAULT_AGENTIC_PROFILE_ID = "macro_tilt"
 DEFAULT_AGENTIC_PROFILE_WEIGHTS: dict[str, float] = {
-    "2.3": 0.55,
-    "2.1": 0.15,
-    "1.1": 0.25,
+    "technical_ta_engine": 0.55,
+    "pattern_recognition_bot": 0.15,
+    "monetary_sentinel": 0.25,
 }
 
 # Mirrors weighted_arbitrator._V4_DECISION_THRESHOLD / sweep _THR_BASE.
@@ -25,7 +25,7 @@ DEFAULT_AGENTIC_DECISION_THRESHOLD: dict[str, Any] = {
     },
     "ta_led": {
         "enabled": True,
-        "agent_id": "2.3",
+        "agent_id": "technical_ta_engine",
         "buy_min_composite": 57,
         "sell_max_composite": 43,
         "min_confidence": 14,

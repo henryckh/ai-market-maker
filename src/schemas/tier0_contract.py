@@ -8,20 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-# LangGraph node id -> AIMM-style agent id string
-TIER0_NODE_TO_AGENT_ID: dict[str, str] = {
-    "monetary_sentinel": "1.1",
-    "news_narrative_miner": "1.2",
-    "pattern_recognition_bot": "2.1",
-    "statistical_alpha_engine": "2.2",
-    "technical_ta_engine": "2.3",
-    "retail_hype_tracker": "3.1",
-    "pro_bias_analyst": "3.2",
-    "whale_behavior_analyst": "4.1",
-    "liquidity_order_flow": "4.2",
-}
+from agents.registry import get_registry
 
 CONTRACT_SCHEMA_VERSION = "tier0/v1"
+TIER0_AGENT_NAMES: frozenset[str] = frozenset(get_registry().names())
 
 
 def _f(x: Any, default: float = 0.0) -> float:
@@ -40,12 +30,12 @@ def _macro_regime_state(liquidity_regime: str) -> int:
     return 1
 
 
-def _contract_1_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_monetary_sentinel(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     score = _f(analysis.get("systemic_beta_score"), 50.0)
     regime = str(analysis.get("liquidity_regime") or "neutral")
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "1.1",
+        "agent": "monetary_sentinel",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "macro_regime_state": _macro_regime_state(regime),
@@ -54,7 +44,7 @@ def _contract_1_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_1_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_news_narrative(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     impact = _f(analysis.get("breaker_score"), 0.0)
     if impact >= 75:
         ev = "Black Swan"
@@ -66,7 +56,7 @@ def _contract_1_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
         ev = "Routine"
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "1.2",
+        "agent": "news_narrative_miner",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "News_Impact_Score": int(round(min(100.0, max(0.0, impact)))),
@@ -75,7 +65,7 @@ def _contract_1_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_2_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_pattern_recognition(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     setup = _f(analysis.get("setup_confidence_score"), 0.0)
     sr = (
         analysis.get("support_resistance")
@@ -89,7 +79,7 @@ def _contract_2_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     pat = analysis.get("pattern") or analysis.get("macro_regime")
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "2.1",
+        "agent": "pattern_recognition_bot",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "Setup_Score": int(round(min(100.0, max(0.0, setup)))),
@@ -98,7 +88,7 @@ def _contract_2_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_2_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_statistical_alpha(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     sig = str(analysis.get("alpha_signal") or "hold").lower()
     label_map = {
         "long_bias": "Strong Buy",
@@ -125,7 +115,7 @@ def _contract_2_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
             conf = 55
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "2.2",
+        "agent": "statistical_alpha_engine",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "Factor_Confluence": conf,
@@ -134,14 +124,14 @@ def _contract_2_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_2_3(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
-    """Classical TA bundle (Agent 2.3) for Tier-1 ``ta_*`` metric_ids."""
+def _contract_technical_ta(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+    """Classical TA bundle for Tier-1 ``ta_*`` metric_ids."""
     ti = analysis.get("ta_indicators")
     if not isinstance(ti, dict):
         ti = {}
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "2.3",
+        "agent": "technical_ta_engine",
         "ticker": ticker,
         "status": str(analysis.get("status") or "skipped"),
         "ta_period": analysis.get("ta_period"),
@@ -151,10 +141,10 @@ def _contract_2_3(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_3_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_retail_hype(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "3.1",
+        "agent": "retail_hype_tracker",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "FOMO_Level": int(min(100, max(0, int(_f(analysis.get("fomo_level"), 50))))),
@@ -163,7 +153,7 @@ def _contract_3_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_3_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_pro_bias(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     score = _f(analysis.get("pro_bias_score"), 50.0)
     regime = str(analysis.get("regime") or "passive_rotation").lower()
     if "accumulation" in regime:
@@ -174,7 +164,7 @@ def _contract_3_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
         etf = "Neutral"
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "3.2",
+        "agent": "pro_bias_analyst",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "Pro_Bias": int(round(min(100.0, max(0.0, score)))),
@@ -183,7 +173,7 @@ def _contract_3_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_4_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_whale_behavior(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     dump = _f(analysis.get("dump_probability"), 0.0)
     gauge = int(round(min(100.0, max(0.0, dump * 100.0))))
     dp = str(analysis.get("dry_powder_alert") or "unknown").lower()
@@ -195,7 +185,7 @@ def _contract_4_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
         dpa = "Normal"
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "4.1",
+        "agent": "whale_behavior_analyst",
         "ticker": ticker,
         "status": str(analysis.get("status") or "success"),
         "Sell_Pressure_Gauge": gauge,
@@ -204,7 +194,7 @@ def _contract_4_1(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     }
 
 
-def _contract_4_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+def _contract_liquidity_order_flow(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     has_depth = bool(analysis.get("nexus_depth_attached"))
     st = str(analysis.get("status") or "skipped")
     slip = analysis.get("slippage_risk_score")
@@ -212,7 +202,7 @@ def _contract_4_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
         slip = 40 if has_depth and st == "success" else 85
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
-        "agent": "4.2",
+        "agent": "liquidity_order_flow",
         "ticker": ticker,
         "status": st,
         "Slippage_Risk_Score": int(slip) if isinstance(slip, (int, float)) else slip,
@@ -222,28 +212,26 @@ def _contract_4_2(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
 
 
 _BUILDERS: dict[str, Any] = {
-    "1.1": _contract_1_1,
-    "1.2": _contract_1_2,
-    "2.1": _contract_2_1,
-    "2.2": _contract_2_2,
-    "2.3": _contract_2_3,
-    "3.1": _contract_3_1,
-    "3.2": _contract_3_2,
-    "4.1": _contract_4_1,
-    "4.2": _contract_4_2,
+    "monetary_sentinel": _contract_monetary_sentinel,
+    "news_narrative_miner": _contract_news_narrative,
+    "pattern_recognition_bot": _contract_pattern_recognition,
+    "statistical_alpha_engine": _contract_statistical_alpha,
+    "technical_ta_engine": _contract_technical_ta,
+    "retail_hype_tracker": _contract_retail_hype,
+    "pro_bias_analyst": _contract_pro_bias,
+    "whale_behavior_analyst": _contract_whale_behavior,
+    "liquidity_order_flow": _contract_liquidity_order_flow,
 }
 
 
 def build_tier0_contract_json(
     node_id: str, primary_analysis: dict[str, Any], ticker: str
 ) -> dict[str, Any]:
-    """Map node id + primary symbol analysis dict to the canonical Tier-0 JSON object."""
-    aid = TIER0_NODE_TO_AGENT_ID.get(node_id, node_id)
-    fn = _BUILDERS.get(aid)
+    fn = _BUILDERS.get(node_id)
     if fn is None:
         return {
             "schema_version": CONTRACT_SCHEMA_VERSION,
-            "agent": aid,
+            "agent": node_id,
             "ticker": ticker,
             "status": "error",
             "error": f"unknown_tier0_node:{node_id}",
@@ -252,11 +240,13 @@ def build_tier0_contract_json(
 
 
 def tier0_contracts_by_agent(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Last-wins index by agent id (e.g. ``1.1``) for Tier-1 convenience."""
     out: dict[str, dict[str, Any]] = {}
     for row in state.get("tier0_contracts") or []:
-        if isinstance(row, dict) and row.get("agent"):
-            out[str(row["agent"])] = row
+        if not isinstance(row, dict):
+            continue
+        aid = row.get("agent") or row.get("agent_id")
+        if aid:
+            out[str(aid)] = row
     return out
 
 
@@ -281,16 +271,16 @@ def tier0_consensus_for_arbitrator(state: dict[str, Any]) -> dict[str, Any]:
     block = False
     parts: list[str] = []
 
-    m = idx.get("1.1") or {}
+    m = idx.get("monetary_sentinel") or {}
     mrs = m.get("macro_regime_state")
     if mrs == 2:
         bull += 1
-        parts.append("1.1_risk_on")
+        parts.append("macro_risk_on")
     elif mrs == 0:
         bear += 1
-        parts.append("1.1_risk_off")
+        parts.append("macro_risk_off")
 
-    n = idx.get("1.2") or {}
+    n = idx.get("news_narrative_miner") or {}
     try:
         ni = int(n.get("News_Impact_Score") or 0)
     except (TypeError, ValueError):
@@ -299,30 +289,30 @@ def tier0_consensus_for_arbitrator(state: dict[str, Any]) -> dict[str, Any]:
     if ni >= 80 or "Black Swan" in et:
         block = True
         bear += 2
-        parts.append("1.2_shock")
+        parts.append("news_shock")
     elif ni >= 55:
         bear += 1
-        parts.append("1.2_elevated_news")
+        parts.append("news_elevated")
 
-    t21 = idx.get("2.1") or {}
+    t21 = idx.get("pattern_recognition_bot") or {}
     try:
         setup = int(t21.get("Setup_Score") or 0)
     except (TypeError, ValueError):
         setup = 0
     if setup >= 70:
         bull += 1
-        parts.append("2.1_setup")
+        parts.append("pattern_setup")
 
-    t22 = idx.get("2.2") or {}
+    t22 = idx.get("statistical_alpha_engine") or {}
     sig = str(t22.get("alpha_signal") or "")
     if "Strong Buy" in sig:
         bull += 1
-        parts.append("2.2_long")
+        parts.append("stat_long")
     elif "Strong Sell" in sig:
         bear += 1
-        parts.append("2.2_short")
+        parts.append("stat_short")
 
-    t23 = idx.get("2.3") or {}
+    t23 = idx.get("technical_ta_engine") or {}
     ti = t23.get("ta_indicators") if isinstance(t23.get("ta_indicators"), dict) else {}
     rsi_v = ti.get("rsi")
     try:
@@ -332,46 +322,46 @@ def tier0_consensus_for_arbitrator(state: dict[str, Any]) -> dict[str, Any]:
     if rsi_f is not None:
         if rsi_f >= 70.0:
             bear += 1
-            parts.append("2.3_rsi_stretched")
+            parts.append("ta_rsi_stretched")
         elif rsi_f <= 30.0:
             bull += 1
-            parts.append("2.3_rsi_oversold")
+            parts.append("ta_rsi_oversold")
 
-    r31 = idx.get("3.1") or {}
+    r31 = idx.get("retail_hype_tracker") or {}
     try:
         fomo = int(r31.get("FOMO_Level") or 0)
     except (TypeError, ValueError):
         fomo = 0
     if r31.get("Divergence_Warning") and fomo >= 85:
         bear += 1
-        parts.append("3.1_hype_div")
+        parts.append("retail_hype_div")
 
-    p32 = idx.get("3.2") or {}
+    p32 = idx.get("pro_bias_analyst") or {}
     etf = str(p32.get("ETF_Trend") or "")
     if etf == "Accumulation":
         bull += 1
-        parts.append("3.2_accum")
+        parts.append("pro_accum")
     elif etf == "Distribution":
         bear += 1
-        parts.append("3.2_dist")
+        parts.append("pro_dist")
 
-    w41 = idx.get("4.1") or {}
+    w41 = idx.get("whale_behavior_analyst") or {}
     try:
         dump = float(w41.get("Dump_Probability") or 0.0)
     except (TypeError, ValueError):
         dump = 0.0
     if dump >= 0.65:
         bear += 1
-        parts.append("4.1_dump")
+        parts.append("whale_dump")
 
-    l42 = idx.get("4.2") or {}
+    l42 = idx.get("liquidity_order_flow") or {}
     try:
         slip = int(l42.get("Slippage_Risk_Score") or 0)
     except (TypeError, ValueError):
         slip = 0
     if slip >= 80:
         bear += 1
-        parts.append("4.2_slip")
+        parts.append("flow_slip")
 
     return {
         "bull_tilt": bull,
@@ -384,7 +374,7 @@ def tier0_consensus_for_arbitrator(state: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "CONTRACT_SCHEMA_VERSION",
-    "TIER0_NODE_TO_AGENT_ID",
+    "TIER0_AGENT_NAMES",
     "build_tier0_contract_json",
     "tier0_contracts_by_agent",
     "tier0_consensus_for_arbitrator",

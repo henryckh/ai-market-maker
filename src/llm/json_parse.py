@@ -11,7 +11,18 @@ We keep parsing logic centralized so all nodes behave consistently.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+
+_THINK_RE = re.compile(
+    r"<(think|thinking|reasoning)>.*?</\1>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _strip_reasoning_wrappers(text: str) -> str:
+    """Drop chain-of-thought wrappers that reasoning models prepend to JSON."""
+    return _THINK_RE.sub("", text or "").strip()
 
 
 def parse_json_object(text: str) -> dict[str, Any] | None:
@@ -20,7 +31,7 @@ def parse_json_object(text: str) -> dict[str, Any] | None:
     Returns a dict if a JSON object can be parsed, else None.
     """
 
-    raw = (text or "").strip()
+    raw = _strip_reasoning_wrappers(text)
     if not raw:
         return None
 

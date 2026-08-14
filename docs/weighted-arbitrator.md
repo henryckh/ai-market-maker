@@ -15,8 +15,9 @@ Tier-0 Agents → desk_risk → desk_debate
     → portfolio_proposal → desk_risk_guard → portfolio_execute → audit
 ```
 
-The arbitrator replaces the `signal_arbitrator` node. It is a **deterministic
-formula engine** — no LLM costs, no API latency, fully reproducible.
+The arbitrator is a **formula engine with an optional LLM overlay** configured in
+deploy JSON (`execution.arbitrator_llm`). Desk weights are static JSON. Math
+always runs; the model may confirm or override the final action.
 
 ## Decision Flow
 
@@ -162,12 +163,13 @@ decision. Per-agent entries contain the full factor breakdown:
 
 ## Opt-In / Opt-Out
 
-The arbitrator supports three modes via `AIMM_ARBITRATOR_MODE`:
+The arbitrator supports optional LLM overlays via deploy JSON:
 
-| Mode                   | Engine                   | Use Case                     |
-|------------------------|--------------------------|------------------------------|
-| `weighted_convergence` | `weighted_arbitrator.py` | Default — deterministic      |
-| `llm`                  | `signal_arbitrator_llm`  | LLM-based synthesis          |
+| Flag | Engine | Use case |
+|------|--------|----------|
+| (none) | `weighted_arbitrator.py` math | Reproducible baseline |
+| `execution.arbitrator_llm` | LLM confirms/overrides action | Agentic PM decision |
+| `execution.use_llm_synthesis` | Per-desk `infer_agent` | Desk CoT, not fusion |
 
 
 Additionally, disable the arbitrator entirely by setting `AIMM_ARBITRATOR_DISABLE=1`

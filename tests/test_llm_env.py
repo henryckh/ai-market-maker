@@ -23,11 +23,11 @@ def test_use_llm_returns_false_when_no_key():
     assert use_llm_arbitrator(env={"AI_MARKET_MAKER_USE_LLM": "1"}) is False
 
 
-def test_use_llm_returns_false_when_explicitly_disabled():
-    """Legacy ``0`` / ``false`` / ``no`` / ``off`` forces off, even with a key."""
+def test_use_llm_legacy_flag_is_not_a_strategy_switch():
+    """Env force-off was retired; a key still enables the provider helper."""
     for val in ("0", "false", "no", "off"):
         env = {"AI_MARKET_MAKER_USE_LLM": val, **_KEY}
-        assert use_llm_arbitrator(env=env) is False, f"{val=} should force off"
+        assert use_llm_arbitrator(env=env) is True
 
 
 def test_use_llm_returns_true_when_key_present():

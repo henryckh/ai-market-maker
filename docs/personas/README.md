@@ -75,5 +75,6 @@ alignment_gating: min_factors_for_directional = 3
 
 ### Optional LLM Features
 
-- **AIMM_ARBITRATOR_MODE=llm**: Use LLM-based arbitrator instead of weighted convergence
-- **AIMM_LLM_DESK_DEBATE=1**: Enable LLM desk debate (Desk_Risk + Desk_Tape LLM turns)
+- **execution.use_llm_synthesis=true**: Per-desk LLM enrichment (`agents.*.llm_enabled`)
+- **execution.arbitrator_llm=true**: LLM may confirm or override the weighted BUY/SELL/HOLD
+- **execution.desk_debate_llm=true**: Enable LLM desk debate (Desk_Risk + Desk_Tape LLM turns)

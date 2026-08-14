@@ -29,7 +29,7 @@ def compact_tier0_for_prompt(state: dict[str, Any]) -> dict[str, Any]:
                 continue
             if isinstance(v, (int, float, str, bool)) or v is None:
                 entry[k] = v
-        if aid == "2.3" and isinstance(row.get("ta_indicators"), dict):
+        if aid == "technical_ta_engine" and isinstance(row.get("ta_indicators"), dict):
             ti = row["ta_indicators"]
             pick = ("rsi", "macd_hist", "macd", "macd_signal", "adx", "ema", "atr", "cci")
             entry["ta_indicators"] = {k: ti[k] for k in pick if k in ti and ti[k] is not None}
@@ -49,24 +49,24 @@ def bull_evidence_lines(state: dict[str, Any]) -> list[str]:
     idx = tier0_contracts_by_agent(state)
     lines: list[str] = []
 
-    m = idx.get("1.1") or {}
+    m = idx.get("monetary_sentinel") or {}
     if m.get("macro_regime_state") == 2:
         lines.append(f"Macro risk-on (liquidity_score={m.get('Liquidity_Score')}, regime_state=2).")
-    n = idx.get("1.2") or {}
+    n = idx.get("news_narrative_miner") or {}
     ni = int(n.get("News_Impact_Score") or 0)
     if ni < 40:
         lines.append(f"News impact contained (News_Impact_Score={ni}).")
 
-    p = idx.get("2.1") or {}
+    p = idx.get("pattern_recognition_bot") or {}
     setup = int(p.get("Setup_Score") or 0)
     if setup >= 55:
         lines.append(f"Pattern setup supportive (Setup_Score={setup}).")
 
-    a = idx.get("2.2") or {}
+    a = idx.get("statistical_alpha_engine") or {}
     if "Strong Buy" in str(a.get("alpha_signal") or ""):
         lines.append("Statistical alpha labels Strong Buy.")
 
-    t = idx.get("2.3") or {}
+    t = idx.get("technical_ta_engine") or {}
     ti = t.get("ta_indicators") if isinstance(t.get("ta_indicators"), dict) else {}
     rsi = ti.get("rsi")
     if rsi is not None and not (isinstance(rsi, float) and math.isnan(rsi)):
@@ -79,21 +79,21 @@ def bull_evidence_lines(state: dict[str, Any]) -> list[str]:
     if mh is not None and _f(mh) > 0:
         lines.append(f"TA MACD histogram positive ({mh}).")
 
-    r = idx.get("3.1") or {}
+    r = idx.get("retail_hype_tracker") or {}
     fomo = int(r.get("FOMO_Level") or 0)
     if fomo < 75 and not r.get("Divergence_Warning"):
         lines.append(f"Retail not in extreme FOMO (FOMO_Level={fomo}).")
 
-    pb = idx.get("3.2") or {}
+    pb = idx.get("pro_bias_analyst") or {}
     if str(pb.get("ETF_Trend") or "") == "Accumulation":
         lines.append("Institutional ETF trend: Accumulation.")
 
-    w = idx.get("4.1") or {}
+    w = idx.get("whale_behavior_analyst") or {}
     dump = _f(w.get("Dump_Probability"), 0.0)
     if dump < 0.45:
         lines.append(f"Whale dump probability moderate ({dump:.2f}).")
 
-    liq = idx.get("4.2") or {}
+    liq = idx.get("liquidity_order_flow") or {}
     slip = int(liq.get("Slippage_Risk_Score") or 0)
     if slip < 75:
         lines.append(f"Execution slippage risk acceptable (Slippage_Risk_Score={slip}).")
@@ -106,28 +106,28 @@ def bear_evidence_lines(state: dict[str, Any]) -> list[str]:
     idx = tier0_contracts_by_agent(state)
     lines: list[str] = []
 
-    m = idx.get("1.1") or {}
+    m = idx.get("monetary_sentinel") or {}
     if m.get("macro_regime_state") == 0:
         lines.append(
             f"Macro risk-off (liquidity_score={m.get('Liquidity_Score')}, regime_state=0)."
         )
 
-    n = idx.get("1.2") or {}
+    n = idx.get("news_narrative_miner") or {}
     ni = int(n.get("News_Impact_Score") or 0)
     et = str(n.get("Event_Type") or "")
     if ni >= 55 or "Black Swan" in et:
         lines.append(f"Headline risk elevated (News_Impact_Score={ni}, Event_Type={et}).")
 
-    p = idx.get("2.1") or {}
+    p = idx.get("pattern_recognition_bot") or {}
     setup = int(p.get("Setup_Score") or 0)
     if setup < 45 and setup > 0:
         lines.append(f"Pattern setup weak (Setup_Score={setup}).")
 
-    a = idx.get("2.2") or {}
+    a = idx.get("statistical_alpha_engine") or {}
     if "Strong Sell" in str(a.get("alpha_signal") or ""):
         lines.append("Statistical alpha labels Strong Sell.")
 
-    t = idx.get("2.3") or {}
+    t = idx.get("technical_ta_engine") or {}
     ti = t.get("ta_indicators") if isinstance(t.get("ta_indicators"), dict) else {}
     rsi = ti.get("rsi")
     if rsi is not None and not (isinstance(rsi, float) and math.isnan(rsi)) and float(rsi) >= 70:
@@ -136,20 +136,20 @@ def bear_evidence_lines(state: dict[str, Any]) -> list[str]:
     if mh is not None and _f(mh) < 0:
         lines.append(f"TA MACD histogram negative ({mh}).")
 
-    r = idx.get("3.1") or {}
+    r = idx.get("retail_hype_tracker") or {}
     if r.get("Divergence_Warning") and int(r.get("FOMO_Level") or 0) >= 80:
         lines.append("Retail hype + divergence warning.")
 
-    pb = idx.get("3.2") or {}
+    pb = idx.get("pro_bias_analyst") or {}
     if str(pb.get("ETF_Trend") or "") == "Distribution":
         lines.append("Institutional ETF trend: Distribution.")
 
-    w = idx.get("4.1") or {}
+    w = idx.get("whale_behavior_analyst") or {}
     dump = _f(w.get("Dump_Probability"), 0.0)
     if dump >= 0.45:
         lines.append(f"Whale dump probability elevated ({dump:.2f}).")
 
-    liq = idx.get("4.2") or {}
+    liq = idx.get("liquidity_order_flow") or {}
     slip = int(liq.get("Slippage_Risk_Score") or 0)
     if slip >= 75:
         lines.append(f"Execution slippage risk high (Slippage_Risk_Score={slip}).")

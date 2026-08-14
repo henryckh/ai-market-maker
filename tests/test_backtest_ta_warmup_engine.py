@@ -50,7 +50,7 @@ def test_warmup_bars_skip_workflow(monkeypatch):
                 "min_warmup_bars": 5,
                 "eval_steps": 8,
                 "ta_warmup_bars": 5,
-                "deploy_profile_weights": {"2.3": 1.0},
+                "deploy_profile_weights": {"technical_ta_engine": 1.0},
                 "interval_sec": 86_400,
             }
         )

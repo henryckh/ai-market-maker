@@ -8,7 +8,7 @@ Core arbitration node that synthesizes all 9 Tier-0 agents' signals into a singl
 - **Type**: Arbitration / Signal Synthesis
 - **Code Class**: `weighted_arbitrator_node` (`src/workflow/weighted_arbitrator.py`) + `compute_weighted_arbitration()` (`src/workflow/weight_assigner.py`)
 - **Enabled by default**: Yes (weighted_convergence mode)
-- **Alternative**: `AIMM_ARBITRATOR_MODE=llm` for LLM-based arbitrator
+- **Alternative**: `execution.arbitrator_llm=true` for an LLM overlay on the weighted decision. Desk weights stay in deploy JSON.
 
 ## Goals
 - Compute per-agent weighted composites from standardized Tier-0 contracts
