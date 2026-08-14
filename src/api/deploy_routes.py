@@ -19,35 +19,20 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from agents.registry import get_registry
+
 router = APIRouter(tags=["deploy"])
 
-
-# ── Constants ────────────────────────────────────────────────────────────
-
 _DEFAULT_DEPLOY_PATH = "config/deploy.active.json"
-_AGENT_WEIGHTS_DEFAULT: dict[str, float] = {
-    "1.1": 0.15,  # monetary_sentinel
-    "1.2": 0.05,  # news_narrative_miner
-    "2.1": 0.20,  # pattern_recognition_bot
-    "2.2": 0.10,  # statistical_alpha_engine
-    "2.3": 0.55,  # technical_ta_engine
-    "3.1": 0.05,  # retail_hype_tracker
-    "3.2": 0.05,  # pro_bias_analyst
-    "4.1": 0.05,  # whale_behavior_analyst
-    "4.2": 0.15,  # liquidity_order_flow
-}
 
-_AGENT_LABELS: dict[str, str] = {
-    "1.1": "Monetary Sentinel",
-    "1.2": "News & Narrative Miner",
-    "2.1": "Pattern Recognition Bot",
-    "2.2": "Statistical Alpha Engine",
-    "2.3": "Technical TA Engine",
-    "3.1": "Retail Hype Tracker",
-    "3.2": "Pro Bias Analyst",
-    "4.1": "Whale Behavior Analyst",
-    "4.2": "Liquidity & Order Flow",
-}
+
+def _agent_labels() -> dict[str, str]:
+    return get_registry().labels()
+
+
+def _agent_weights_default() -> dict[str, float]:
+    return get_registry().default_weights()
+
 
 _GRAPH_EDGES_DEFAULT: list[dict[str, str]] = [
     {"from": "policy_orchestrator", "to": "market_scan"},
@@ -113,6 +98,7 @@ class ExecConfig(BaseModel):
         description="weighted_convergence | agent_llm",
     )
     desk_debate_enabled: bool = False
+    arbitrator_llm: bool = False
     nexus_api_key: str | None = None
     default_ticker: str = "BTC/USDT"
     universe_symbols: list[str] = Field(
@@ -176,7 +162,7 @@ def _resolve_effective_weights(
     profile: ProfileWeights,
 ) -> dict[str, float]:
     """Build effective weight map: defaults + per-agent overrides + profile deltas."""
-    weights = dict(_AGENT_WEIGHTS_DEFAULT)
+    weights = dict(_agent_weights_default())
 
     # Per-agent weight overrides
     for agent in agents:
@@ -207,14 +193,14 @@ def _validate_config(req: DeployConfigRequest) -> dict[str, Any]:
     warnings: list[str] = []
 
     # Validate agent IDs
-    valid_ids = set(_AGENT_LABELS.keys())
+    valid_ids = set(_agent_labels())
     known_ids = {a.id for a in req.agents}
     unknown = known_ids - valid_ids
     if unknown:
         warnings.append(f"Unknown agent ids: {', '.join(sorted(unknown))}")
 
     # Check mandatory agents
-    mandatory = {"2.1", "2.3"}  # core TA agents
+    mandatory = {"pattern_recognition_bot", "technical_ta_engine"}  # core TA agents
     missing_mandatory = mandatory - known_ids
     if missing_mandatory:
         warnings.append(
@@ -260,7 +246,7 @@ async def deploy_config(req: DeployConfigRequest) -> dict[str, Any]:
         aid = agent.id
         agent_map[aid] = {
             "id": aid,
-            "label": agent.label or _AGENT_LABELS.get(aid, aid),
+            "label": agent.label or _agent_labels().get(aid, aid),
             "enabled": agent.enabled,
             "llm_enabled": agent.llm_enabled,
             "persona_path": agent.persona_path or f"operator/{aid}/persona.md",
@@ -386,9 +372,9 @@ async def deploy_config_schema() -> dict[str, Any]:
     Useful for the Config UI to generate the form dynamically.
     """
     return {
-        "agent_ids": list(_AGENT_LABELS.keys()),
-        "agent_labels": _AGENT_LABELS,
-        "default_weights": _AGENT_WEIGHTS_DEFAULT,
+        "agent_ids": list(_agent_labels().keys()),
+        "agent_labels": _agent_labels(),
+        "default_weights": _agent_weights_default(),
         "default_edges": _GRAPH_EDGES_DEFAULT,
         "arbitrator_modes": ["weighted_convergence", "agent_llm"],
         "valid_modes": ["weighted_convergence", "agent_llm"],

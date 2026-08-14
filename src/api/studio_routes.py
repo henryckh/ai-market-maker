@@ -774,7 +774,7 @@ async def post_studio_chat(request: Request, req: StudioChatRequest) -> dict[str
             status_code=503,
             detail={
                 "error": "llm_required",
-                "hint": "Set OPENAI_API_KEY (and ensure AI_MARKET_MAKER_USE_LLM is not forcing LLM off).",
+                "hint": "Set OPENAI_API_KEY or ATLASCLOUD_API_KEY, and enable use_llm_synthesis in deploy JSON.",
             },
         )
 

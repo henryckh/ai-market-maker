@@ -186,6 +186,11 @@ class BacktestEngine:
             else None,
             ta_warmup_bars=ta_warmup,
             eval_bars=eval_steps,
+            use_llm=bool(
+                c.get("use_llm")
+                or c.get("arbitrator_mode") == "agent_llm"
+                or c.get("deploy_arbitrator_mode") == "agent_llm"
+            ),
         )
 
         _pw = c.get("deploy_profile_weights")
@@ -194,7 +199,7 @@ class BacktestEngine:
                 str(k) for k, v in sorted(_pw.items(), key=lambda x: -float(x[1] or 0))
             ]
         else:
-            _active_agents = ["2.3", "2.1", "1.1"]
+            _active_agents = ["technical_ta_engine", "pattern_recognition_bot", "monetary_sentinel"]
 
         run_mem = RunWorkingMemory(cfg=run_memory_config(settings))
 
@@ -403,6 +408,10 @@ class BacktestEngine:
                 dt = deploy_cfg.get("decision_threshold")
                 if isinstance(dt, dict) and dt:
                     state["decision_threshold"] = dt
+                exec_cfg = deploy_cfg.get("execution")
+                if isinstance(exec_cfg, dict):
+                    if "arbitrator_llm" in exec_cfg:
+                        state["arbitrator_llm"] = bool(exec_cfg.get("arbitrator_llm"))
             state["universe"] = list(bars_by_symbol.keys())
             state["market_data"] = {
                 s: {

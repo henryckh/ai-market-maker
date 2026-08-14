@@ -3,9 +3,8 @@
 1. **Deterministic** (always): macro/risk vs tape/alpha summaries from Tier-0 hooks — no API cost,
    visible in live flow events, backtest ``iterations.jsonl``, and downstream LLM arbitrator context.
 
-2. **Optional LLM** (``AIMM_LLM_DESK_DEBATE=1`` when LLM arbitrator is on): two short model turns —
-   Desk_Risk may call ``nexus.fetch_market_depth``; Desk_Tape is narrative-only (no tools) so operators
-   see different tool access patterns in logs.
+2. **Optional LLM** (``execution.desk_debate_llm`` in deploy JSON): two short model turns —
+   Desk_Risk may call ``nexus.fetch_market_depth``; Desk_Tape is narrative-only (no tools).
 """
 
 from __future__ import annotations
@@ -137,8 +136,20 @@ def deterministic_debate_entries(state: HedgeFundState) -> list[dict[str, Any]]:
     ]
 
 
+def _desk_debate_llm_enabled() -> bool:
+    try:
+        from config.deploy_loader import get_desk_debate_llm
+
+        flag = get_desk_debate_llm()
+        if flag is not None:
+            return bool(flag)
+    except Exception:
+        pass
+    return False
+
+
 def llm_desk_debate_entries(state: HedgeFundState) -> list[dict[str, Any]]:
-    if not _env_bool("AIMM_LLM_DESK_DEBATE", default=False):
+    if not _desk_debate_llm_enabled():
         return []
     ctx = _compact_context(state)
     out: list[dict[str, Any]] = []

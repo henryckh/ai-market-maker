@@ -2,10 +2,22 @@
   "profile": {
     "profile_id": "macro_tilt"
   },
-  "effective_weights": {
-    "2.3": 0.55,
-    "2.1": 0.15,
-    "1.1": 0.25
+  "agents": {
+    "technical_ta_engine": {
+      "weight": 0.55,
+      "llm_enabled": true,
+      "enabled": true
+    },
+    "pattern_recognition_bot": {
+      "weight": 0.15,
+      "llm_enabled": false,
+      "enabled": true
+    },
+    "monetary_sentinel": {
+      "weight": 0.25,
+      "llm_enabled": false,
+      "enabled": true
+    }
   },
   "decision_threshold": {
     "buy": {
@@ -26,14 +38,16 @@
     },
     "ta_led": {
       "enabled": true,
-      "agent_id": "2.3",
+      "agent_id": "technical_ta_engine",
       "buy_min_composite": 57,
       "sell_max_composite": 43,
       "min_confidence": 14
     }
   },
   "execution": {
-    "arbitrator_mode": "agent_llm",
+    "use_llm_synthesis": true,
+    "desk_debate_llm": false,
+    "arbitrator_llm": true,
     "allows_short": true,
     "leverage": 2.0
   }

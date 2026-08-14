@@ -65,7 +65,7 @@ _THR_BASE: dict[str, Any] = {
     },
     "ta_led": {
         "enabled": True,
-        "agent_id": "2.3",
+        "agent_id": "technical_ta_engine",
         "buy_min_composite": 57,
         "sell_max_composite": 43,
         "min_confidence": 14,
@@ -161,19 +161,31 @@ PRESETS: tuple[AgenticPreset, ...] = (
     AgenticPreset(
         id="ta_heavy_75",
         label="TA-heavy desk (2.3@0.75, ta_led 55/44)",
-        profile_weights={"2.3": 0.75, "2.1": 0.10, "1.1": 0.10},
+        profile_weights={
+            "technical_ta_engine": 0.75,
+            "pattern_recognition_bot": 0.10,
+            "monetary_sentinel": 0.10,
+        },
         decision_threshold=_thr(ta_led={"buy_min_composite": 55, "sell_max_composite": 44}),
     ),
     AgenticPreset(
         id="balanced_desk",
         label="Balanced TA + pattern (2.3@0.55, 2.1@0.25, global 54/18)",
-        profile_weights={"2.3": 0.55, "2.1": 0.25, "1.1": 0.15},
+        profile_weights={
+            "technical_ta_engine": 0.55,
+            "pattern_recognition_bot": 0.25,
+            "monetary_sentinel": 0.15,
+        },
         decision_threshold=_thr(buy={"min_composite": 54, "min_confidence": 18}),
     ),
     AgenticPreset(
         id="conservative_gate",
         label="Conservative gates (2.3@0.60, ta_led 59/41)",
-        profile_weights={"2.3": 0.60, "2.1": 0.20, "1.1": 0.15},
+        profile_weights={
+            "technical_ta_engine": 0.60,
+            "pattern_recognition_bot": 0.20,
+            "monetary_sentinel": 0.15,
+        },
         decision_threshold=_thr(ta_led={"buy_min_composite": 59, "sell_max_composite": 41}),
     ),
     AgenticPreset(
@@ -185,19 +197,31 @@ PRESETS: tuple[AgenticPreset, ...] = (
     AgenticPreset(
         id="pattern_assist",
         label="Pattern-assist blend (2.1@0.30, 2.3@0.50)",
-        profile_weights={"2.3": 0.50, "2.1": 0.30, "1.1": 0.15},
+        profile_weights={
+            "technical_ta_engine": 0.50,
+            "pattern_recognition_bot": 0.30,
+            "monetary_sentinel": 0.15,
+        },
         decision_threshold=None,
     ),
     AgenticPreset(
         id="macro_tilt",
         label="Macro tilt (1.1@0.25, 2.3@0.55)",
-        profile_weights={"2.3": 0.55, "2.1": 0.15, "1.1": 0.25},
+        profile_weights={
+            "technical_ta_engine": 0.55,
+            "pattern_recognition_bot": 0.15,
+            "monetary_sentinel": 0.25,
+        },
         decision_threshold=None,
     ),
     AgenticPreset(
         id="aggressive_ta",
         label="Aggressive TA (2.3@0.70, ta_led 54/44, buy 51)",
-        profile_weights={"2.3": 0.70, "2.1": 0.12, "1.1": 0.10},
+        profile_weights={
+            "technical_ta_engine": 0.70,
+            "pattern_recognition_bot": 0.12,
+            "monetary_sentinel": 0.10,
+        },
         decision_threshold=_thr(
             buy={"min_composite": 51, "min_confidence": 15},
             ta_led={"buy_min_composite": 54, "sell_max_composite": 44, "min_confidence": 12},
@@ -206,7 +230,11 @@ PRESETS: tuple[AgenticPreset, ...] = (
     AgenticPreset(
         id="strict_align",
         label="Strict alignment (min 3 factors, ta_led 58/42)",
-        profile_weights={"2.3": 0.65, "2.1": 0.15, "1.1": 0.10},
+        profile_weights={
+            "technical_ta_engine": 0.65,
+            "pattern_recognition_bot": 0.15,
+            "monetary_sentinel": 0.10,
+        },
         decision_threshold=_thr(
             alignment_gating={"enabled": True, "min_factors_for_directional": 3},
             ta_led={"buy_min_composite": 58, "sell_max_composite": 42},

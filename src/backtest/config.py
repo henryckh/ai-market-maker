@@ -1,4 +1,4 @@
-"""Backtest config: merge deploy JSON, env vars, and CLI overrides."""
+"""Backtest config: merge deploy JSON and CLI overrides."""
 
 from __future__ import annotations
 
@@ -74,12 +74,12 @@ def resolve_backtest_config(
     )
 
     result: dict[str, Any] = {
-        "arbitrator_mode": ARBITRATOR_AGENT_LLM,
+        "arbitrator_mode": ARBITRATOR_WEIGHTED_CONVERGENCE,
         "profile_weights": default_agentic_profile_weights(),
         "profile_id": DEFAULT_AGENTIC_PROFILE_ID,
         "decision_threshold": default_agentic_decision_threshold(),
         "allows_short": True,
-        "use_llm": True,
+        "use_llm": False,
         "take_profit_pct": 0.0,
         "stop_loss_pct": 0.0,
         "leverage": 2.0,
@@ -89,19 +89,11 @@ def resolve_backtest_config(
         "source_description": "defaults",
     }
 
-    env_arb_mode = (env.get("AIMM_ARBITRATOR_MODE") or "").strip().lower()
-    if env_arb_mode in VALID_ARBITRATOR_MODES:
-        result["arbitrator_mode"] = env_arb_mode
-
+    # Optional: which deploy file to load (path only — not strategy knobs).
+    # An explicit deploy_path argument wins over the env alias.
     env_deploy_path = (env.get("AIMM_DEPLOY_CONFIG_PATH") or "").strip()
-    if env_deploy_path:
+    if not deploy_path and env_deploy_path:
         deploy_path = env_deploy_path
-
-    use_llm_env = (env.get("AI_MARKET_MAKER_USE_LLM") or "").strip()
-    if use_llm_env in ("0", "false", "no", "off"):
-        logger.warning(
-            "AI_MARKET_MAKER_USE_LLM=0 is ignored; agentic backtests require LLM (agent_llm)."
-        )
 
     deploy_cfg: dict[str, Any] | None = None
     deploy_execution: Mapping[str, Any] | None = None
@@ -120,41 +112,59 @@ def resolve_backtest_config(
         result["deploy_path"] = str(deploy_file.resolve())
         result["deploy_loaded"] = True
 
-        deploy_arb_mode = (deploy_cfg.get("execution") or {}).get("arbitrator_mode")
-        if deploy_arb_mode in VALID_ARBITRATOR_MODES:
-            result["arbitrator_mode"] = deploy_arb_mode
+        exec_cfg = (
+            deploy_cfg.get("execution") if isinstance(deploy_cfg.get("execution"), dict) else {}
+        )
+        deploy_execution = exec_cfg
 
-        ew = deploy_cfg.get("effective_weights")
-        if isinstance(ew, dict):
-            result["profile_weights"] = dict(ew)
+        use_llm = exec_cfg.get("use_llm_synthesis")
+        if use_llm is None:
+            legacy = str(exec_cfg.get("arbitrator_mode") or "").strip().lower()
+            use_llm = legacy in ("agent_llm", "llm", "full_agentic")
+        if use_llm:
+            result["arbitrator_mode"] = ARBITRATOR_AGENT_LLM
+            result["use_llm"] = True
+        else:
+            result["arbitrator_mode"] = ARBITRATOR_WEIGHTED_CONVERGENCE
+            result["use_llm"] = False
+
+        agents = deploy_cfg.get("agents")
+        if isinstance(agents, dict) and agents:
+            weights: dict[str, float] = {}
+            for name, meta in agents.items():
+                if not isinstance(meta, dict) or meta.get("enabled", True) is False:
+                    continue
+                try:
+                    weights[str(name)] = float(meta.get("weight") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+            if weights:
+                positive = {k: v for k, v in weights.items() if v > 0}
+                if positive:
+                    result["profile_weights"] = positive
 
         dt = deploy_cfg.get("decision_threshold")
         if isinstance(dt, dict) and dt:
             result["decision_threshold"] = dict(dt)
 
-        exec_allows = (deploy_cfg.get("execution") or {}).get("allows_short")
-        if exec_allows is not None:
-            result["allows_short"] = bool(exec_allows)
+        if exec_cfg.get("allows_short") is not None:
+            result["allows_short"] = bool(exec_cfg.get("allows_short"))
 
-        profile_id = (
-            deploy_cfg.get("profile", {}).get("profile_id")
-            if isinstance(deploy_cfg.get("profile"), dict)
-            else None
-        )
-        if profile_id:
-            result["profile_id"] = str(profile_id)
+        profile = deploy_cfg.get("profile")
+        if isinstance(profile, dict) and profile.get("profile_id"):
+            result["profile_id"] = str(profile["profile_id"])
 
-        exec_cfg = deploy_cfg.get("execution") or {}
-        deploy_execution = exec_cfg if isinstance(exec_cfg, dict) else {}
-        lev = deploy_execution.get("leverage") or result["leverage"]
-        mhb = deploy_execution.get("max_hold_bars") or result["max_hold_bars"]
+        lev = exec_cfg.get("leverage") or result["leverage"]
+        mhb = exec_cfg.get("max_hold_bars") or result["max_hold_bars"]
         result["leverage"] = float(lev) if lev else 2.0
         result["max_hold_bars"] = int(mhb) if mhb else 0
 
+    # CLI can still pick a deploy mode for a single experiment run
     if cli_arbitrator_mode is not None and cli_arbitrator_mode.strip():
         mode = cli_arbitrator_mode.strip().lower()
         if mode in VALID_ARBITRATOR_MODES:
             result["arbitrator_mode"] = mode
+            result["use_llm"] = mode == ARBITRATOR_AGENT_LLM
         else:
             logger.warning("unknown arbitrator mode %r, ignoring", mode)
 
@@ -170,14 +180,6 @@ def resolve_backtest_config(
 
     if cli_max_hold_bars is not None and cli_max_hold_bars > 0:
         result["max_hold_bars"] = int(cli_max_hold_bars)
-
-    result["use_llm"] = result["arbitrator_mode"] == ARBITRATOR_AGENT_LLM
-    if result["arbitrator_mode"] == ARBITRATOR_WEIGHTED_CONVERGENCE:
-        logger.warning(
-            "weighted_convergence is deprecated for product runs; defaulting to agent_llm."
-        )
-        result["arbitrator_mode"] = ARBITRATOR_AGENT_LLM
-        result["use_llm"] = True
 
     from backtest.symbol_routing import resolve_agent_led_symbols
 
@@ -199,15 +201,16 @@ def resolve_backtest_config(
 
 
 def set_env_from_config(cfg: dict[str, Any]) -> None:
-    """Apply resolved config to process environment."""
-    mode = str(cfg.get("arbitrator_mode") or ARBITRATOR_AGENT_LLM)
-    if mode == ARBITRATOR_WEIGHTED_CONVERGENCE:
-        mode = ARBITRATOR_AGENT_LLM
-    os.environ["AIMM_ARBITRATOR_MODE"] = mode
+    """Apply non-strategy process settings for a backtest run."""
+    os.environ.pop("AIMM_ARBITRATOR_MODE", None)
     os.environ.pop("AI_MARKET_MAKER_USE_LLM", None)
     os.environ.pop("AIMM_LLM_MODE", None)
-    # Enable file-backed agent decision cache (historical bars are deterministic).
+    os.environ.pop("AIMM_LLM_AGENTS", None)
+    os.environ.pop("AIMM_LLM_DESK_DEBATE", None)
     os.environ["MODE"] = "backtest"
+
+    if cfg.get("deploy_path"):
+        os.environ["AIMM_DEPLOY_CONFIG_PATH"] = str(cfg["deploy_path"])
 
     if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") is None:
         os.environ["AIMM_BACKTEST_VERBOSE_RECEIPTS"] = "1"

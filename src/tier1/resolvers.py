@@ -62,15 +62,15 @@ def resolve_metric(metric_id: str, state: dict[str, Any]) -> Any:
     mid = (metric_id or "").strip().lower()
     idx = tier0_by_agent_for_ticker(state)
 
-    c11 = idx.get("1.1") or {}
-    c12 = idx.get("1.2") or {}
-    c21 = idx.get("2.1") or {}
-    c22 = idx.get("2.2") or {}
-    c23 = idx.get("2.3") or {}
-    c31 = idx.get("3.1") or {}
-    c32 = idx.get("3.2") or {}
-    c41 = idx.get("4.1") or {}
-    c42 = idx.get("4.2") or {}
+    c11 = idx.get("monetary_sentinel") or {}
+    c12 = idx.get("news_narrative_miner") or {}
+    c21 = idx.get("pattern_recognition_bot") or {}
+    c22 = idx.get("statistical_alpha_engine") or {}
+    c23 = idx.get("technical_ta_engine") or {}
+    c31 = idx.get("retail_hype_tracker") or {}
+    c32 = idx.get("pro_bias_analyst") or {}
+    c41 = idx.get("whale_behavior_analyst") or {}
+    c42 = idx.get("liquidity_order_flow") or {}
 
     if mid in ("", "none"):
         return None

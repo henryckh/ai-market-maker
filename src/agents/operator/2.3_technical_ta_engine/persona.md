@@ -20,7 +20,7 @@ Classical Technical Indicator Analyst — computes and interprets standard TA in
 ```json
 {
   "schema_version": "tier0/v1",
-  "agent": "2.3",
+  "agent": "technical_ta_engine",
   "ta_period": "4h",
   "bars_used": 100,
   "indicator_catalog_version": "ta_bundle/v1",

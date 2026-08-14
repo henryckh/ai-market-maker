@@ -10,7 +10,7 @@ Each profile file contains:
   {
     "profile_id": "user_a1b2c3...",
     "created_at": 1710000000,
-    "effective_weights": {"1.1": 0.05, ...},
+    "effective_weights": {"monetary_sentinel": 0.05, ...},
     "narrative": "Balanced Technician",
     "input": { ... }
   }

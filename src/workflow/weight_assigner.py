@@ -16,11 +16,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents.registry import get_registry
 from schemas.arbitration import (
     AGENT_FACTOR_MAP,
-    AGENT_LABEL_MAP,
-    AGENT_TYPE_MAP,
-    AGENT_WEIGHTS_DEFAULT,
     AgentWeightedSignal,
     ArbitrationResult,
     FactorSignal,
@@ -63,7 +61,7 @@ def _normalize_linear(val: float, raw_max: float, raw_min: float = 0.0) -> float
 # ---------------------------------------------------------------------------
 
 
-def _agent_1_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _monetary_sentinel_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """Monetary Sentinel — macro regime + liquidity score."""
     mrs = _f(contract.get("macro_regime_state"), 1.0)
     ls = _f(contract.get("Liquidity_Score"), 50.0)
@@ -75,7 +73,7 @@ def _agent_1_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     return {"macro_bias": (regime_bull * 0.6 + score_bull * 0.4)}
 
 
-def _agent_1_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _news_narrative_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """News & Narrative Miner."""
     ni = _f(contract.get("News_Impact_Score"), 50.0)
     et = str(contract.get("Event_Type") or "Routine")
@@ -93,7 +91,9 @@ def _agent_1_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_2_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _pattern_recognition_factors(
+    contract: dict[str, Any], state: dict[str, Any]
+) -> dict[str, float]:
     """Pattern Recognition Bot."""
     ss = _f(contract.get("Setup_Score"), 50.0)
     # pattern_quality — derive from pattern field
@@ -123,7 +123,7 @@ def _agent_2_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_2_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _statistical_alpha_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """Statistical Alpha Engine."""
     sig = str(contract.get("alpha_signal") or "Hold")
     sig_map = {"Strong Buy": 0.85, "Buy": 0.65, "Hold": 0.50, "Sell": 0.35, "Strong Sell": 0.15}
@@ -139,7 +139,7 @@ def _agent_2_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_2_3_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _technical_ta_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """Technical TA Engine."""
     ti = contract.get("ta_indicators") if isinstance(contract.get("ta_indicators"), dict) else {}
     rsi = _f(ti.get("rsi"), 50.0)
@@ -203,7 +203,7 @@ def _agent_2_3_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_3_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _retail_hype_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """Retail Hype Tracker."""
     fomo = _f(contract.get("FOMO_Level"), 50.0)
     # High FOMO → bearish (retail euphoria), low FOMO → bullish (fear/despair)
@@ -220,7 +220,7 @@ def _agent_3_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_3_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _pro_bias_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """Pro Bias / Smart Money Tracker."""
     pb = _f(contract.get("Pro_Bias"), 50.0)
     etf_raw = str(contract.get("ETF_Trend") or "Neutral")
@@ -236,7 +236,7 @@ def _agent_3_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_4_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _whale_behavior_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
     """Whale Behavior."""
     dp = _f(contract.get("Dump_Probability"), 0.0)
     # Higher dump probability → bearish
@@ -251,7 +251,9 @@ def _agent_4_1_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-def _agent_4_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[str, float]:
+def _liquidity_order_flow_factors(
+    contract: dict[str, Any], state: dict[str, Any]
+) -> dict[str, float]:
     """Liquidity & Order Flow."""
     slip = _f(contract.get("Slippage_Risk_Score"), 50.0)
     # Higher slippage risk → bearish
@@ -266,17 +268,16 @@ def _agent_4_2_factors(contract: dict[str, Any], state: dict[str, Any]) -> dict[
     }
 
 
-# Registry: agent_id → extractor function
 _AGENT_EXTRACTORS: dict[str, Any] = {
-    "1.1": _agent_1_1_factors,
-    "1.2": _agent_1_2_factors,
-    "2.1": _agent_2_1_factors,
-    "2.2": _agent_2_2_factors,
-    "2.3": _agent_2_3_factors,
-    "3.1": _agent_3_1_factors,
-    "3.2": _agent_3_2_factors,
-    "4.1": _agent_4_1_factors,
-    "4.2": _agent_4_2_factors,
+    "monetary_sentinel": _monetary_sentinel_factors,
+    "news_narrative_miner": _news_narrative_factors,
+    "pattern_recognition_bot": _pattern_recognition_factors,
+    "statistical_alpha_engine": _statistical_alpha_factors,
+    "technical_ta_engine": _technical_ta_factors,
+    "retail_hype_tracker": _retail_hype_factors,
+    "pro_bias_analyst": _pro_bias_factors,
+    "whale_behavior_analyst": _whale_behavior_factors,
+    "liquidity_order_flow": _liquidity_order_flow_factors,
 }
 
 # ---------------------------------------------------------------------------
@@ -290,32 +291,20 @@ def compute_agent_weighted_signals(
     agent_weights: dict[str, float] | None = None,
     disabled_agents: set[str] | None = None,
 ) -> list[AgentWeightedSignal]:
-    """Compute per-agent weighted signals from Tier-0 contracts.
-
-    Parameters
-    ----------
-    state : dict
-        HedgeFundState (or any dict with ``tier0_contracts``).
-    agent_weights : dict, optional
-        Override default agent weights (from v4 config or runtime).
-    disabled_agents : set[str], optional
-        Agent IDs to skip (e.g. ``{"4.1"}`` when Whale is disabled).
-
-    Returns
-    -------
-    list[AgentWeightedSignal]
-        One entry per agent, sorted by agent_id.
-    """
+    """Per-agent composites from Tier-0 contracts. Only desks in *agent_weights* are scored."""
     idx = tier0_contracts_by_agent(state)
-    weights = dict(AGENT_WEIGHTS_DEFAULT)
+    labels = get_registry().labels()
     if agent_weights:
-        weights.update(agent_weights)
+        weights = {str(k): float(v) for k, v in agent_weights.items() if float(v or 0) > 0}
+    else:
+        weights = {k: v for k, v in get_registry().default_weights().items() if v > 0}
     disabled = set(disabled_agents or set())
+    iterate = [aid for aid in weights if aid in _AGENT_EXTRACTORS and aid not in disabled]
 
     signals: list[AgentWeightedSignal] = []
 
-    for aid in sorted(AGENT_FACTOR_MAP.keys()):
-        contract = idx.get(aid, {})
+    for aid in sorted(iterate):
+        contract = idx.get(aid) or {}
         extractor = _AGENT_EXTRACTORS.get(aid)
         if extractor is None:
             continue
@@ -323,8 +312,8 @@ def compute_agent_weighted_signals(
         raw_factors = extractor(contract, state)
         factor_map = AGENT_FACTOR_MAP.get(aid, {})
 
-        agent_w = weights.get(aid, 0.0)
-        enabled = aid not in disabled and contract.get("status") not in ("error", "skipped")
+        agent_w = float(weights.get(aid, 0.0) or 0.0)
+        enabled = contract.get("status") not in ("error", "skipped")
 
         factor_signals: list[FactorSignal] = []
         composite = 0.0
@@ -348,7 +337,7 @@ def compute_agent_weighted_signals(
                 )
             )
 
-        # If agent has no defined factors (e.g. 1.1), use raw_factors directly
+        # monetary_sentinel has no AGENT_FACTOR_MAP entries — use extractor output directly
         if total_factor_weight <= 0 and raw_factors:
             for fid, raw_val in raw_factors.items():
                 norm_val = _clamp(raw_val)
@@ -389,8 +378,8 @@ def compute_agent_weighted_signals(
         signals.append(
             AgentWeightedSignal(
                 agent_id=aid,
-                agent_type=AGENT_TYPE_MAP.get(aid, ""),
-                label=AGENT_LABEL_MAP.get(aid, ""),
+                agent_type=aid,
+                label=labels.get(aid, aid),
                 composite=raw_composite,
                 raw_composite=raw_composite,
                 agent_weight=agent_w if enabled else 0.0,
@@ -481,25 +470,7 @@ def compute_weighted_arbitration(
     disabled_agents: set[str] | None = None,
     decision_threshold: dict[str, Any] | None = None,
 ) -> ArbitrationResult:
-    """Full weighted convergence arbitration pipeline.
-
-    Parameters
-    ----------
-    state : dict
-        HedgeFundState.
-    agent_weights : dict, optional
-        Override default weights.
-    disabled_agents : set[str], optional
-        Agents to exclude.
-    decision_threshold : dict, optional
-        Threshold overrides:
-            buy: {min_composite: 60, min_confidence: 50}
-            sell: {max_composite: 40, min_confidence: 50}
-
-    Returns
-    -------
-    ArbitrationResult
-    """
+    """Weighted fusion + buy/sell/hold gates."""
     signals = compute_agent_weighted_signals(
         state, agent_weights=agent_weights, disabled_agents=disabled_agents
     )
@@ -549,7 +520,7 @@ def compute_weighted_arbitration(
         buy_triggered = False
         sell_triggered = False
 
-    # TA-led desk override: agent 2.3 can trigger direction from its own composite.
+    # TA-led desk can fire from its own composite when the global gate holds.
     ta_led_reasons: list[str] = []
     ta_led = decision_threshold.get("ta_led") if decision_threshold else None
     if isinstance(ta_led, dict) and ta_led.get("enabled", True):
@@ -557,7 +528,7 @@ def compute_weighted_arbitration(
 
         tc = tier0_consensus_for_arbitrator(state)
         block_long = bool(tc.get("block_aggressive_long"))
-        ta_id = str(ta_led.get("agent_id") or "2.3")
+        ta_id = str(ta_led.get("agent_id") or "technical_ta_engine")
         ta_sig = next((s for s in enabled_sigs if s.agent_id == ta_id), None)
         if ta_sig is not None:
             buy_min_ta = _f(ta_led.get("buy_min_composite", 57), 57.0) / 100.0

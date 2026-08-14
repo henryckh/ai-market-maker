@@ -2,12 +2,22 @@
   "profile": {
     "profile_id": "ohlcv_only"
   },
-  "effective_weights": {
-    "2.3": 0.75,
-    "2.1": 0.25
+  "agents": {
+    "technical_ta_engine": {
+      "weight": 0.75,
+      "llm_enabled": false,
+      "enabled": true
+    },
+    "pattern_recognition_bot": {
+      "weight": 0.25,
+      "llm_enabled": false,
+      "enabled": true
+    }
   },
   "execution": {
-    "arbitrator_mode": "agent_llm",
+    "use_llm_synthesis": false,
+    "desk_debate_llm": false,
+    "arbitrator_llm": false,
     "allows_short": true,
     "leverage": 1.5
   }

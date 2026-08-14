@@ -16,6 +16,7 @@ from typing import Any
 from openai import OpenAI
 
 from config.llm_env import resolve_llm_config
+from llm.json_parse import parse_json_object
 
 # Lazy-loaded decision cache
 _DECISION_CACHE: Any = None
@@ -42,46 +43,54 @@ def _get_decision_cache() -> Any:
     return _DECISION_CACHE
 
 
-def _cache_key_for_agent(
-    agent_id: str,
-    ticker: str | None,
-    prompt_text: str,
-) -> str | None:
-    """Generate a deterministic cache key for this agent call.
+def _date_tag_from_state(state: dict[str, Any]) -> str:
+    sm = state.get("shared_memory") if isinstance(state.get("shared_memory"), dict) else {}
+    bt = sm.get("backtest") if isinstance(sm.get("backtest"), dict) else {}
+    ts = bt.get("window_last_ts_ms")
+    if ts is None:
+        ts = state.get("ts_ms")
+    try:
+        return str(int(float(ts)))
+    except (TypeError, ValueError):
+        return "na"
 
-    Returns None if caching is disabled.
-    """
-    cache = _get_decision_cache()
-    enabled_fn = cache.get("enabled")
-    if enabled_fn and not enabled_fn():
-        return None
-    raw = f"{agent_id}|{ticker or ''}|{prompt_text}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+
+def _prompt_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 logger = logging.getLogger(__name__)
 
 
 _AGENT_INFO: dict[str, dict[str, str]] = {
-    "1.1": {"name": "Monetary Sentinel", "dir": "1.1_monetary_sentinel"},
-    "1.2": {"name": "News & Narrative Miner", "dir": "1.2_news_narrative_miner"},
-    "2.1": {"name": "Pattern Recognition Bot", "dir": "2.1_pattern_recognition_bot"},
-    "2.2": {"name": "Statistical Alpha Engine", "dir": "2.2_statistical_alpha_engine"},
-    "2.3": {"name": "Technical TA Engine", "dir": "2.3_technical_ta_engine"},
-    "3.1": {"name": "Retail Hype Tracker", "dir": "3.1_retail_hype_tracker"},
-    "3.2": {"name": "Pro Bias Analyst", "dir": "3.2_pro_bias_analyst"},
-    "4.1": {"name": "Whale Behavior Analyst", "dir": "4.1_whale_behavior_analyst"},
-    "4.2": {"name": "Liquidity & Order Flow", "dir": "4.2_liquidity_order_flow"},
+    "monetary_sentinel": {"name": "Monetary Sentinel", "dir": "1.1_monetary_sentinel"},
+    "news_narrative_miner": {"name": "News & Narrative Miner", "dir": "1.2_news_narrative_miner"},
+    "pattern_recognition_bot": {
+        "name": "Pattern Recognition Bot",
+        "dir": "2.1_pattern_recognition_bot",
+    },
+    "statistical_alpha_engine": {
+        "name": "Statistical Alpha Engine",
+        "dir": "2.2_statistical_alpha_engine",
+    },
+    "technical_ta_engine": {"name": "Technical TA Engine", "dir": "2.3_technical_ta_engine"},
+    "retail_hype_tracker": {"name": "Retail Hype Tracker", "dir": "3.1_retail_hype_tracker"},
+    "pro_bias_analyst": {"name": "Pro Bias Analyst", "dir": "3.2_pro_bias_analyst"},
+    "whale_behavior_analyst": {
+        "name": "Whale Behavior Analyst",
+        "dir": "4.1_whale_behavior_analyst",
+    },
+    "liquidity_order_flow": {"name": "Liquidity & Order Flow", "dir": "4.2_liquidity_order_flow"},
 }
 
 # Per-agent PascalCase schema (weight_assigner extractors read these fields).
 # Nested keys are documented inline; underscores denote nesting.
 _AGENT_OUTPUT_SCHEMA: dict[str, list[str]] = {
-    "1.1": ["macro_regime_state", "Liquidity_Score"],
-    "1.2": ["News_Impact_Score", "Event_Type"],
-    "2.1": ["Setup_Score", "pattern"],
-    "2.2": ["cross_sectional_z_score", "kalman_support", "alpha_signal"],
-    "2.3": [
+    "monetary_sentinel": ["macro_regime_state", "Liquidity_Score"],
+    "news_narrative_miner": ["News_Impact_Score", "Event_Type"],
+    "pattern_recognition_bot": ["Setup_Score", "pattern"],
+    "statistical_alpha_engine": ["cross_sectional_z_score", "kalman_support", "alpha_signal"],
+    "technical_ta_engine": [
         "ta_indicators.rsi",
         "ta_indicators.macd_hist",
         "ta_indicators.obv",
@@ -92,19 +101,23 @@ _AGENT_OUTPUT_SCHEMA: dict[str, list[str]] = {
         "ta_indicators.volume",
         "ta_indicators.pattern_rec",
     ],
-    "3.1": ["FOMO_Level", "Divergence_Warning"],
-    "3.2": ["Pro_Bias", "ETF_Trend"],
-    "4.1": ["Dump_Probability", "Sell_Pressure_Gauge"],
-    "4.2": ["Slippage_Risk_Score", "Order_Imbalance"],
+    "retail_hype_tracker": ["FOMO_Level", "Divergence_Warning"],
+    "pro_bias_analyst": ["Pro_Bias", "ETF_Trend"],
+    "whale_behavior_analyst": ["Dump_Probability", "Sell_Pressure_Gauge"],
+    "liquidity_order_flow": ["Slippage_Risk_Score", "Order_Imbalance"],
 }
 
 # Neutral defaults for every field — returned when LLM fails or omits a field.
 _NEUTRAL_CONTRACT: dict[str, dict[str, Any]] = {
-    "1.1": {"macro_regime_state": "neutral", "Liquidity_Score": 50},
-    "1.2": {"News_Impact_Score": 50, "Event_Type": "neutral"},
-    "2.1": {"Setup_Score": 50, "pattern": "none"},
-    "2.2": {"cross_sectional_z_score": 0.0, "kalman_support": 50, "alpha_signal": 0.0},
-    "2.3": {
+    "monetary_sentinel": {"macro_regime_state": "neutral", "Liquidity_Score": 50},
+    "news_narrative_miner": {"News_Impact_Score": 50, "Event_Type": "neutral"},
+    "pattern_recognition_bot": {"Setup_Score": 50, "pattern": "none"},
+    "statistical_alpha_engine": {
+        "cross_sectional_z_score": 0.0,
+        "kalman_support": 50,
+        "alpha_signal": 0.0,
+    },
+    "technical_ta_engine": {
         "ta_indicators": {
             "rsi": 50,
             "macd_hist": 0.0,
@@ -116,10 +129,10 @@ _NEUTRAL_CONTRACT: dict[str, dict[str, Any]] = {
             "pattern_rec": "none",
         }
     },
-    "3.1": {"FOMO_Level": 50, "Divergence_Warning": 50},
-    "3.2": {"Pro_Bias": 50, "ETF_Trend": 50},
-    "4.1": {"Dump_Probability": 50, "Sell_Pressure_Gauge": 50},
-    "4.2": {"Slippage_Risk_Score": 50, "Order_Imbalance": 0.0},
+    "retail_hype_tracker": {"FOMO_Level": 50, "Divergence_Warning": 50},
+    "pro_bias_analyst": {"Pro_Bias": 50, "ETF_Trend": 50},
+    "whale_behavior_analyst": {"Dump_Probability": 50, "Sell_Pressure_Gauge": 50},
+    "liquidity_order_flow": {"Slippage_Risk_Score": 50, "Order_Imbalance": 0.0},
 }
 
 _AGENTS_BASE = Path(__file__).resolve().parent.parent / "agents" / "operator"
@@ -141,8 +154,8 @@ def _init_llm() -> None:
 
     llm_config = resolve_llm_config(
         key_names=("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"),
-        base_url_names=("AIMM_LLM_BASE_URL",),
-        model_names=("AIMM_LLM_MODEL",),
+        base_url_names=("AIMM_LLM_BASE_URL", "OPENAI_BASE_URL"),
+        model_names=("AIMM_LLM_MODEL", "OPENAI_MODEL"),
         default_base_url="https://api.deepseek.com/v1",
         default_model="deepseek-chat",
     )
@@ -404,13 +417,12 @@ def _build_agent_prompt(
         "### Critical Rules:\n"
         "- The deterministic analysis is **context only**. Do NOT copy it verbatim.\n"
         "- You must reason from the raw market data and produce your OWN assessment.\n"
-        "- Output ONLY valid JSON with these exact fields:\n"
-        "```json\n"
+        "- Reply with a single JSON object only. No markdown fences, no preamble, "
+        "no <think> blocks.\n"
+        "- Required fields (use these types; fill every key):\n"
         f"{schema_json}\n"
-        "```\n"
         "- Every field is required. If you have no strong opinion, use the neutral default shown above.\n"
-        '- Add a "reasoning" field (string) explaining your key signal adjustments.\n'
-        "Output ONLY the JSON on a single line or pretty-printed. No preamble, no markdown fences.\n"
+        '- Add a "reasoning" field (string, <= 400 chars) explaining your key signal adjustments.\n'
     )
 
     user = f"## Current Market Data\n{market_context}\n\nProduce your structured signal now."
@@ -420,24 +432,8 @@ def _build_agent_prompt(
 
 def _parse_llm_json(text: str | None) -> dict[str, Any]:
     """Robust JSON extraction from LLM output."""
-    if not text or not text.strip():
-        return {}
-    raw = text.strip()
-    if raw.startswith("```"):
-        idx = raw.find("\n")
-        if idx != -1:
-            raw = raw[idx:].strip()
-        if raw.endswith("```"):
-            raw = raw[:-3].strip()
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        raw = raw[start : end + 1]
-    try:
-        obj = json.loads(raw)
-        return obj if isinstance(obj, dict) else {}
-    except json.JSONDecodeError:
-        return {}
+    parsed = parse_json_object(text or "")
+    return parsed if parsed is not None else {}
 
 
 def _fill_missing_fields(output: dict[str, Any], agent_id: str) -> dict[str, Any]:
@@ -500,6 +496,126 @@ def _error_contract(agent_id: str, error_reason: str) -> dict[str, Any]:
     return contract
 
 
+def _chat_create(
+    client: OpenAI,
+    *,
+    model_name: str,
+    messages: list[dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+) -> Any:
+    kwargs: dict[str, Any] = {
+        "model": model_name,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": 45,
+        "extra_body": {"thinking": {"type": "disabled"}},
+    }
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        msg = str(exc).lower()
+        unknown = "unknown" in msg or "unexpected" in msg or "not supported" in msg
+        if unknown and ("thinking" in msg or "extra_body" in msg):
+            kwargs.pop("extra_body", None)
+            return client.chat.completions.create(**kwargs)
+        raise
+
+
+def _message_content(resp: Any) -> str:
+    try:
+        return resp.choices[0].message.content or ""
+    except (AttributeError, IndexError, TypeError):
+        return ""
+
+
+def complete_json(
+    *,
+    cache_id: str,
+    system: str,
+    user: str,
+    state: dict[str, Any],
+    ticker: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.1,
+    max_tokens: int = 1024,
+) -> dict[str, Any]:
+    """Cached JSON completion with thinking disabled. Empty dict on failure."""
+    try:
+        client = _get_client()
+    except ValueError as e:
+        logger.warning("agent_llm: no API key for %s: %s", cache_id, e)
+        return {}
+
+    cache = _get_decision_cache()
+    ticker_s = str(ticker or state.get("ticker") or "")
+    prompt_hash = _prompt_hash(system + "\n" + user)
+    date_tag = _date_tag_from_state(state)
+    read_fn = cache.get("read")
+    if read_fn:
+        hit = read_fn(cache_id, ticker_s, date_tag, prompt_hash)
+        if isinstance(hit, dict) and hit:
+            logger.info("agent_llm: cache HIT for %s date=%s", cache_id, date_tag)
+            out = dict(hit)
+            out["cached"] = True
+            return out
+
+    model_name = model or get_default_model()
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    try:
+        resp = _chat_create(
+            client,
+            model_name=model_name,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as e:
+        logger.warning("agent_llm: LLM call failed for %s: %s", cache_id, e)
+        return {}
+
+    text = _message_content(resp)
+    obj = _parse_llm_json(text)
+    if not obj:
+        logger.warning(
+            "agent_llm: unparseable output for %s, retrying once snippet=%r",
+            cache_id,
+            text[:240],
+        )
+        retry_msgs = [
+            {"role": "system", "content": system + "\nReturn ONLY a JSON object. No markdown."},
+            {"role": "user", "content": user},
+        ]
+        try:
+            resp = _chat_create(
+                client,
+                model_name=model_name,
+                messages=retry_msgs,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            text = _message_content(resp)
+            obj = _parse_llm_json(text)
+        except Exception as e:
+            logger.warning("agent_llm: retry failed for %s: %s", cache_id, e)
+            obj = {}
+    if not obj:
+        logger.warning("agent_llm: unparseable output for %s after retry", cache_id)
+        return {}
+
+    write_fn = cache.get("write")
+    if write_fn:
+        try:
+            write_fn(cache_id, ticker_s, date_tag, prompt_hash, obj)
+        except Exception as e:
+            logger.debug("agent_llm: cache write failed: %s", e)
+    return obj
+
+
 def infer_agent(
     agent_id: str,
     state: dict[str, Any],
@@ -508,29 +624,15 @@ def infer_agent(
     ticker: str | None = None,
     model: str | None = None,
     temperature: float = 0.1,
-    max_tokens: int = 1024,
+    max_tokens: int = 2048,
 ) -> dict[str, Any]:
     """Run a single agent's LLM inference.
 
     **No fallback to deterministic.** If the LLM call fails, an error
     contract with neutral values is returned (source: error).
-
-    Args:
-        agent_id: Agent identifier (e.g., ``"2.3"``).
-        state: Full HedgeFundState dict.
-        deterministic_contract: Tier-0 deterministic findings —
-            used ONLY as context in the prompt. NOT a fallback output.
-        ticker: Override primary ticker (default from state).
-        model: Model override (default from ``AIMM_LLM_MODEL`` env).
-        temperature: LLM temperature.
-        max_tokens: Max output tokens.
-
-    Returns:
-        Dict with the agent's PascalCase fields + metadata.
-        ``source`` is ``"agent_llm"`` on success, ``"error"`` on failure.
     """
     try:
-        client = _get_client()
+        _get_client()
     except ValueError as e:
         raise ValueError(
             f"agent_llm mode requires an LLM API key for agent {agent_id}. "
@@ -545,63 +647,102 @@ def infer_agent(
         deterministic_contract=deterministic_contract,
         agent_id=agent_id,
     )
-
     system, user = _build_agent_prompt(agent_id, persona, skill, market_context)
-
-    # Decision cache: check before LLM call
-    cache = _get_decision_cache()
-    full_prompt = system + "\n" + user
-    ck = _cache_key_for_agent(agent_id, ticker or state.get("ticker", ""), full_prompt)
-    if ck:
-        cached = cache.get("read")
-        if cached:
-            hit = cached(agent_id, ck)
-            if hit is not None:
-                logger.info("agent_llm: cache HIT for %s (key=%s...)", agent_id, ck[:12])
-                hit["agent"] = agent_id
-                hit["agent_id"] = agent_id
-                hit["source"] = "agent_llm"
-                hit["llm_enabled"] = True
-                hit["cached"] = True
-                return _fill_missing_fields(hit, agent_id)
-
-    try:
-        resp = client.chat.completions.create(
-            model=model or get_default_model(),
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=45,
-        )
-    except Exception as e:
-        logger.warning("agent_llm: LLM call failed for %s: %s", agent_id, e)
-        return _error_contract(agent_id, f"API error: {e}")
-
-    text = resp.choices[0].message.content or ""
-    obj = _parse_llm_json(text)
+    obj = complete_json(
+        cache_id=agent_id,
+        system=system,
+        user=user,
+        state=state,
+        ticker=ticker,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
     if not obj:
-        logger.warning("agent_llm: unparseable output for %s", agent_id)
         return _error_contract(agent_id, "unparseable LLM response")
 
+    cached = bool(obj.pop("cached", False))
     result = _fill_missing_fields(obj, agent_id)
     result["agent"] = agent_id
     result["agent_id"] = agent_id
     result["label"] = _AGENT_INFO.get(agent_id, {}).get("name", agent_id)
     result["source"] = "agent_llm"
     result["llm_enabled"] = True
-
-    # Write to cache for reproducibility
-    write_fn = cache.get("write")
-    if ck and write_fn:
-        try:
-            write_fn(agent_id, ck, result)
-        except Exception as e:
-            logger.debug("agent_llm: cache write failed: %s", e)
-
+    result["cached"] = cached
     return result
+
+
+def infer_arbitrator_decision(
+    math_brief: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    ticker: str | None = None,
+) -> dict[str, Any]:
+    """LLM overlay on the weighted math decision. Empty/invalid → source error."""
+    system = (
+        "You are the signal arbitrator for an agentic crypto hedge fund.\n"
+        "Deterministic math already produced a composite, confidence, and gate result.\n"
+        "You may confirm or override the trade decision.\n"
+        'Return ONLY JSON: {"action": "BUY"|"SELL"|"HOLD", '
+        '"stance": "bullish"|"bearish"|"neutral", '
+        '"confidence": number 0-1, "reasons": [string, ...]}.'
+    )
+    user = json.dumps(
+        {
+            "ticker": ticker or state.get("ticker"),
+            "math": math_brief,
+            "desk_scores": _desk_score_brief(state),
+        },
+        default=str,
+    )
+    obj = complete_json(
+        cache_id="signal_arbitrator",
+        system=system,
+        user=user,
+        state=state,
+        ticker=ticker,
+        max_tokens=512,
+    )
+    action = str(obj.get("action") or "").upper()
+    stance = str(obj.get("stance") or "").lower()
+    if action not in ("BUY", "SELL", "HOLD"):
+        return {"source": "error"}
+    if stance not in ("bullish", "bearish", "neutral"):
+        stance = {"BUY": "bullish", "SELL": "bearish"}.get(action, "neutral")
+    try:
+        conf = max(0.0, min(0.95, float(obj.get("confidence"))))
+    except (TypeError, ValueError):
+        conf = 0.5
+    reasons = obj.get("reasons")
+    if not isinstance(reasons, list):
+        reasons = []
+    return {
+        "source": "agent_llm",
+        "action": action,
+        "stance": stance,
+        "confidence": round(conf, 4),
+        "reasons": [str(r) for r in reasons][:8],
+        "cached": bool(obj.get("cached")),
+    }
+
+
+def _desk_score_brief(state: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for c in state.get("tier0_contracts") or []:
+        if not isinstance(c, dict):
+            continue
+        aid = str(c.get("agent_id") or c.get("agent") or "")
+        if not aid:
+            continue
+        rows.append(
+            {
+                "agent": aid,
+                "composite": c.get("composite"),
+                "stance": c.get("stance"),
+                "confidence": c.get("confidence"),
+            }
+        )
+    return rows[:12]
 
 
 def check_api_key() -> str | None:
@@ -617,7 +758,9 @@ def check_api_key() -> str | None:
 
 
 __all__ = [
-    "infer_agent",
     "check_api_key",
+    "complete_json",
     "get_default_model",
+    "infer_agent",
+    "infer_arbitrator_decision",
 ]

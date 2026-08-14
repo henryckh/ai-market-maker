@@ -41,9 +41,7 @@ def run_tool_calling_chat(
     """
     llm_config = resolve_llm_config()
     if not llm_config.api_key:
-        raise ValueError(
-            "OPENAI_API_KEY or ATLASCLOUD_API_KEY is required when AI_MARKET_MAKER_USE_LLM=1"
-        )
+        raise ValueError("OPENAI_API_KEY or ATLASCLOUD_API_KEY is required for LLM calls")
 
     api_key = llm_config.api_key
     base_url = llm_config.base_url
@@ -209,9 +207,7 @@ def stream_chat_completion(
     """
     llm_config = resolve_llm_config()
     if not llm_config.api_key:
-        raise ValueError(
-            "OPENAI_API_KEY or ATLASCLOUD_API_KEY is required when AI_MARKET_MAKER_USE_LLM=1"
-        )
+        raise ValueError("OPENAI_API_KEY or ATLASCLOUD_API_KEY is required for LLM calls")
 
     api_key = llm_config.api_key
     base_url = llm_config.base_url

@@ -13,7 +13,11 @@ def test_consensus_empty_state():
 def test_consensus_news_shock_blocks():
     state = {
         "tier0_contracts": [
-            {"agent": "1.2", "News_Impact_Score": 85, "Event_Type": "Major Catalyst"},
+            {
+                "agent": "news_narrative_miner",
+                "News_Impact_Score": 85,
+                "Event_Type": "Major Catalyst",
+            },
         ]
     }
     c = tier0_consensus_for_arbitrator(state)

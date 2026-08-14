@@ -40,45 +40,32 @@ settings keep priority.
 
 Budget-friendly API access: https://www.atlascloud.ai/console/coding-plan
 
-> **No LLM key → the process exits with a clear error.** No fallback, no silent
-> degradation. This is intentional — the system is an LLM-native architecture.
+> **No LLM key → desk CoT and arbitrator overlay cannot run.** Weighted math still
+> produces a decision. An LLM call without a key raises a clear error.
 
 ---
 
 ## Optional Environment Variables
 
-### Arbitrator Mode
+### Strategy / agentic settings
 
-| Variable              | Values                                     | Default                |
-|-----------------------|--------------------------------------------|------------------------|
-| `AIMM_ARBITRATOR_MODE`| `weighted_convergence` / `llm` / `legacy`  | `weighted_convergence` |
+**Not in `.env`.** Configure via `config/deploy.active.json` (see `docs/agentic-config.md`):
 
-- **weighted_convergence** (default): deterministic factor-weighted engine, no LLM cost
-- **llm**: LLM-based synthesis (uses OPENAI_API_KEY)
-- **legacy**: original Tier-0 consensus voting
+- `agents.*.weight` / `llm_enabled` / `enabled`
+- `execution.use_llm_synthesis`
+- `execution.arbitrator_llm`
+- `execution.desk_debate_llm`
+- `decision_threshold`
 
-### Agent Toggles
+Optional path only: `AIMM_DEPLOY_CONFIG_PATH` selects which deploy JSON file to load.
+
+### Safety / ops
 
 | Variable                         | Effect                                  |
 |----------------------------------|-----------------------------------------|
-| `AIMM_ORCHESTRATOR_DISABLE`      | Skip policy orchestrator node           |
-| `AIMM_TA_TIER0_DISABLE`          | Disable technical TA agent              |
 | `AIMM_RISK_GUARD_KILL_SWITCH`    | Emergency stop — blocks all trades      |
-
-
-Each agent derives its enabled/disabled state from:
-1. Hardcoded default (e.g., Whale 4.1 is disabled by default)
-2. Environment variable override
-3. Orchestrator policy override (when orchestrator is active)
-
-### Debug & Observability
-
-| Variable                  | Purpose                                      |
-|---------------------------|----------------------------------------------|
-| `AIMM_DEBUG_RISK`         | Verbose risk calculation logs                |
-| `AIMM_FLOW_INCLUDE_FULL_DEBATE` | Include full debate transcript in output |
-| `AIMM_LLM_DESK_DEBATE`    | Enable LLM desk debate (costly)              |
-| `STRATEGY_INTERVAL_SEC`   | Graph run interval (default: 180)            |
+| `STRATEGY_INTERVAL_SEC`          | Graph run interval (default: 180)       |
+| `AIMM_DEBUG_RISK`                | Verbose risk calculation logs           |
 
 ### Execution
 
@@ -113,8 +100,8 @@ desk_market_scan ── [always on]
 ├─ liquidity_order_flow ── [config weight=0 → skip]
         │
 desk_risk ── [always on]
-desk_debate ── [always on, LLM part guarded by AIMM_LLM_DESK_DEBATE]
-signal_arbitrator ── [AIMM_ARBITRATOR_MODE selects engine]
+desk_debate ── [always on; LLM part from execution.desk_debate_llm]
+signal_arbitrator ── [execution.use_llm_synthesis selects engine]
 portfolio_proposal ── [always on]
 desk_risk_guard ── [AIMM_RISK_GUARD_KILL_SWITCH]
 portfolio_execute ── [MODE controls real vs paper]
@@ -123,11 +110,11 @@ audit ── [always on]
 
 ### Enabling/disabling agents via weight config
 
-Setting an agent's weight to `0.0` effectively disables it. The remaining enabled
-weights are re-normalized automatically:
+Setting an agent's weight to `0.0`, or omitting it from deploy JSON `agents`, disables it.
+Omitted desks are skipped in the graph. Remaining enabled weights are re-normalized:
 
 ```python
-weights = {"2.1": 0.25, "2.3": 0.30, "4.2": 0.15}  # others set to 0
+weights = {"pattern_recognition_bot": 0.25, "technical_ta_engine": 0.30, "liquidity_order_flow": 0.15}
 # Normalized internally: 0.25 + 0.30 + 0.15 = 0.70 ≠ 1.0
 # Each weight scaled by 1/0.70: 0.357 + 0.429 + 0.214 = 1.0
 ```
@@ -155,7 +142,7 @@ AIMM_TA_TIER0_DISABLE      ← Technical TA
 
 ### Layer 2 — Arbitrator
 ```
-AIMM_ARBITRATOR_MODE       ← Engine selection
+deploy.active.json         ← Engine selection (use_llm_synthesis)
 ```
 
 ### Layer 3 — Execution

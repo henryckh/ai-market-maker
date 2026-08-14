@@ -23,6 +23,7 @@ from .auth_routes import router as auth_router
 from .backtest_routes import recover_stale_backtest_jobs
 from .backtest_routes import router as backtest_router
 from .capabilities_routes import router as capabilities_router
+from .config_designer_routes import router as config_designer_router
 from .copy_routes import router as copy_router
 from .deploy_routes import router as deploy_router
 from .engine_routes import router as engine_router
@@ -143,6 +144,7 @@ app.include_router(capabilities_router)
 app.include_router(ops_router)
 app.include_router(profile_router)
 app.include_router(deploy_router)
+app.include_router(config_designer_router)
 app.include_router(engine_router)
 
 

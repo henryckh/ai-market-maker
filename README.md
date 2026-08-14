@@ -31,7 +31,7 @@ Designed to feel like a small professional trading firm — not just another bot
 - **OpenClaw-ready packaging** (`SKILL.md` + `manifest.json` + dedicated runners)
 - Paper trading on Binance Testnet + rich local backtester; Hyperliquid adapter (dry-run) via OMS layer
 - Modern web dashboard for telemetry and traces
-- Clean configuration (JSON policy + env for secrets only)
+- Clean configuration: **deploy JSON** for strategy, policy/app JSON for defaults, `.env` for secrets only
 
 ### Sponsorship — Atlas Cloud
 
@@ -75,9 +75,9 @@ Deeper agentic capabilities, better OpenClaw integration, and support for additi
 
 Rough flow (LangGraph):
 
-1. **Market scan + Tier-0 desks** — macro, TA, pattern, stats, narrative, flow, …
-2. **Risk + desk debate** — risk context, then bull/bear evidence
-3. **Signal arbitrator** — optional per-desk LLM (`agent_llm`), then **weight assigner** fuses scores into BUY/SELL/HOLD
+1. **Market scan + Tier-0 desks** — enabled desks from deploy JSON (TA, macro, pattern, …)
+2. **Risk + desk debate** — risk context; optional `desk_debate_llm` (off in shipped presets)
+3. **Signal arbitrator** — static `agents.*.weight` math first; optional desk CoT (`llm_enabled`) then optional `arbitrator_llm` overlay → BUY/SELL/HOLD
 4. **Portfolio** — proposal → Risk Guard veto → execute
 
 <img width="784" height="1138" alt="workflow_diagram" src="https://github.com/user-attachments/assets/fcf5d491-7562-4acc-8499-3d93d24d395b" />
@@ -109,7 +109,8 @@ uv run pre-commit install
 
 # 5. Set up environment
 cp .env.example .env
-# Edit .env — set OPENAI_API_KEY or ATLASCLOUD_API_KEY (agentic runs need a key)
+# Edit .env — set OPENAI_API_KEY or ATLASCLOUD_API_KEY (required for LLM calls)
+# Strategy (desks, weights, LLM overlays) lives in config/deploy.active.json
 
 # 6. Run the platform stack: DB + migrate + API + worker + web
 # Requires Docker Desktop. Futu OpenD optional (`--profile with-futu`).
@@ -225,10 +226,12 @@ pip install ta-lib
 **Note for OpenClaw Users:** If running in OpenClaw environment without sudo privileges, use Option 1 (Conda) as shown in the CI workflow.
 
 ### Configuration Philosophy
-- **Policy & universe** → `config/policy.default.json` and `config/app.default.json` (single source of truth)
-- **Secrets** → only in `.env`
+- **Strategy** → `config/deploy.active.json` (desks, weights, LLM overlays, gates). See [`docs/agentic-config.md`](docs/agentic-config.md)
+- **Policy & universe** → `config/policy.default.json` and `config/app.default.json`
+- **Secrets / ops** → `.env` only (no arbitrator-mode or LLM-agent env flags)
 
 Detailed docs:
+- [`docs/agentic-config.md`](docs/agentic-config.md)
 - [`docs/configuration.md`](docs/configuration.md)
 - [`docs/policy-schema.md`](docs/policy-schema.md)
 - [`docs/run-modes.md`](docs/run-modes.md)
@@ -247,13 +250,13 @@ uv run pytest -q tests/test_agentic_trading_e2e.py tests/test_tier0_consensus.py
 
 ## Agents (Desks)
 
-- **Tier-0** — macro (1.1), news (1.2), pattern (2.1), stats (2.2), TA (2.3), retail hype / pro bias / whale / liquidity (3.x–4.x)
+- **Tier-0** — `monetary_sentinel`, `news_narrative_miner`, `pattern_recognition_bot`, `statistical_alpha_engine`, `technical_ta_engine`, `retail_hype_tracker`, `pro_bias_analyst`, `whale_behavior_analyst`, `liquidity_order_flow`
 - **Market scan, risk, desk debate** — universe + risk context before arbitration
-- **Signal arbitrator** — desk LLMs (when `agent_llm`) then weight assigner → `trade_intent`
+- **Signal arbitrator** — weighted math on static JSON weights; optional desk CoT + `arbitrator_llm` overlay → `trade_intent`
 - **Portfolio** — proposal / execute
 - **Risk Guard** — hard veto before execution
 
-Default research weights (`macro_tilt`): 2.3×0.55, 1.1×0.25, 2.1×0.15. Personas in `docs/personas/`; interface in `src/agents/base_agent.py`.
+Default research combo (`macro_tilt` in `config/deploy.active.json`): TA×0.55, macro×0.25, pattern×0.15. Personas in `docs/personas/`; interface in `src/agents/base_agent.py`.
 
 ---
 
@@ -286,7 +289,7 @@ AIMM_BACKTEST_OHLCV_NEXUS=0 AIMM_BACKTEST_LLM_MAX_STEPS=200 uv run python -m bac
   --ticker BTC/USDT
 ```
 
-OHLCV-derived macro context feeds agent **1.1** in backtest (no live Nexus, no look-ahead).
+OHLCV-derived macro context feeds `monetary_sentinel` in backtest (no live Nexus, no look-ahead).
 See [`docs/backtest-data.md`](docs/backtest-data.md) for data layers and future Nexus agent wiring.
 
 Watch **stderr** for the per-bar transcript; stdout ends with JSON metrics;
@@ -321,25 +324,26 @@ Research helpers (period sweep, preset compare) live under `out/scripts/` (gitig
 
 | Knob | Recommendation | Why |
 |------|----------------|-----|
-| **Desk combo** | `macro_tilt` (`config/deploy.active.json`): 2.3×0.55, 1.1×0.25, 2.1×0.15 | Golden gates; leverage 2.0 |
+| **Desk combo** | `macro_tilt` in `config/deploy.active.json`: `technical_ta_engine`×0.55 (`llm_enabled`), `monetary_sentinel`×0.25, `pattern_recognition_bot`×0.15 | Static weights; TA CoT + `arbitrator_llm`; leverage 2.0 |
 | **Horizon** | `--steps 180` daily (50 warmup + 180 eval) | Best return/Sharpe balance in period sweep |
 | **Period lock** | `--until 2026-07-12` | Pin eval end date when CSV grows |
 | **Data** | `bootstrap_showcase --eval-steps 180 --until 2026-07-12` → `--csv-only` | Enough history for offline reruns |
 | **OHLCV context** | `AIMM_BACKTEST_OHLCV_NEXUS=0` | OHLCV-only desk; defers live Nexus |
-| **Nexus desks** | Defer 1.2/3.x/4.x to later PR | Need historical feeds — see `docs/backtest-data.md` |
+| **Nexus desks** | Enable in deploy JSON when you have historical feeds | See `docs/backtest-data.md` |
 | **Symbols** | BTC + ETH + SOL | Multi-asset book; transcript defaults to `--ticker` only |
 | **Transcript** | `AIMM_BACKTEST_TERMINAL_ALL_SYMBOLS=1` optional | Show all three symbols per bar (verbose) |
 | **Stress test** | `--steps 365` separately | Full-year bear-market eval; report PF even if &lt; 1 |
 
 ```bash
-# Optional: explicit desk list (same as macro_tilt default)
-AIMM_LLM_AGENTS=2.3,2.1,1.1 NEXUS_DISABLE=1 AIMM_BACKTEST_LLM_MAX_STEPS=200 \
+# Desk list + LLM flags come from config/deploy.active.json
+NEXUS_DISABLE=1 AIMM_BACKTEST_LLM_MAX_STEPS=200 \
   uv run python -m backtest.run_demo \
+  --deploy config/deploy.active.json \
   --symbols 'BTC/USDT,ETH/USDT,SOL/USDT' --steps 180 --until 2026-07-12 --online --timeframe 1d --ticker BTC/USDT
 ```
 
 If you see `ModuleNotFoundError: No module named 'backtest'`, you are not in the repo root or dependencies are not installed (`uv sync`).
-If your `.env` sets `AIMM_STRATEGY_PRESET`, it overrides `config/app.default.json` strategy defaults; unset it to use shipped `app.default.json` presets.
+`AIMM_STRATEGY_PRESET` / `AIMM_DESK_STRATEGY_PRESET` are optional TA/research overlays, not LLM strategy flags. Desk LLM and arbitrator overlays come from deploy JSON.
 
 ### How the default backtest works (agentic)
 
@@ -347,15 +351,17 @@ Each bar invokes the full LangGraph workflow with **LLM-active** desks:
 
 | Piece | Behavior |
 |-------|----------|
-| **Arbitrator mode** | Default `agent_llm` — per-agent LLM inference (`infer_agent`) then **weighted convergence** fusion |
+| **Fusion** | Weighted math on static `agents.*.weight` (not retuned each bar) |
+| **Desk LLM** | `execution.use_llm_synthesis` + `agents.*.llm_enabled` → `infer_agent` |
+| **Arbitrator LLM** | `execution.arbitrator_llm` overlay after math (falls back to math on failure) |
 | **Portfolio** | Always `llm_portfolio_proposal` / `llm_portfolio_execute` (no rule-based fallback) |
-| **OHLCV context** | Market scan + Tier-0 math feed LLM prompts; 1.1 gets OHLCV-derived macro (`AIMM_BACKTEST_OHLCV_NEXUS=1`) |
+| **OHLCV context** | Market scan + Tier-0 math feed prompts; `monetary_sentinel` can use OHLCV-derived macro (`AIMM_BACKTEST_OHLCV_NEXUS=1`). Showcase commands use `=0`. |
 | **No fallback layer** | Graph `trade_intent` only — no HOLD→BUY/SELL override |
 | **Fill model** | Signal on completed bars; fill at bar open; TP/SL at bar close |
 | **Terminal output** | Per-bar desk CoT on stderr (on by default in backtest; disable with `AIMM_BACKTEST_TERMINAL_LOG=0`) |
 | **Audit receipts** | `tier0_summary` in iterations (on by default in backtest; disable with `AIMM_BACKTEST_VERBOSE_RECEIPTS=0`) |
 
-Optional: `config/deploy.active.json` with `agents[id].llm_enabled` or `AIMM_LLM_AGENTS=2.1,2.3` to limit which desks call the LLM.
+Strategy knobs: `config/deploy.active.json` — see [`docs/agentic-config.md`](docs/agentic-config.md).
 
 ### Comparison with [TradingAgents](https://github.com/TauricResearch/TradingAgents)
 
@@ -470,7 +476,7 @@ ai-market-maker/
 │   └── api/                # FastAPI endpoints
 ├── web/                    # Next.js dashboard
 ├── openclaw/               # OpenClaw skill definitions
-├── config/                 # Default policy and app config
+├── config/                 # deploy.active.json (strategy) + policy/app defaults
 ├── assets/                 # Branding
 ├── docs/                   # Detailed documentation
 ├── tests/                  # Test suite

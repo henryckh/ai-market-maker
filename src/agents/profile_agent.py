@@ -16,8 +16,8 @@ Output:
     {
         "profile_id": "user_<hash>",
         "base": "AGENT_WEIGHTS_DEFAULT",
-        "deltas": {"2.1": "+0.10", "1.2": "-0.05", ...},
-        "effective_weights": {"1.1": 0.05, "2.1": 0.35, ...},
+        "deltas": {"pattern_recognition_bot": "+0.10", "news_narrative_miner": "-0.05", ...},
+        "effective_weights": {"monetary_sentinel": 0.05, "pattern_recognition_bot": 0.35, ...},
         "reasoning": "Pattern-based trader with news confirmation bias...",
         "narrative": "Technician"
     }
@@ -31,32 +31,12 @@ import os
 import time
 from typing import Any
 
+from agents.registry import get_registry
 from config.llm_env import llm_key_available
 
-# Default base weights (mirrors _V4_AGENT_WEIGHTS in weighted_arbitrator.py)
-AGENT_WEIGHTS_DEFAULT: dict[str, float] = {
-    "1.1": 0.15,
-    "1.2": 0.05,
-    "2.1": 0.20,
-    "2.2": 0.10,
-    "2.3": 0.55,
-    "3.1": 0.05,
-    "3.2": 0.05,
-    "4.1": 0.05,  # disabled by default, but kept for config
-    "4.2": 0.15,
-}
-
-AGENT_LABELS: dict[str, str] = {
-    "1.1": "monetary_sentinel (Macro Regime)",
-    "1.2": "news_narrative_miner (News & Narrative)",
-    "2.1": "pattern_recognition_bot (Chart Patterns)",
-    "2.2": "statistical_alpha_engine (Statistical Alpha)",
-    "2.3": "technical_ta_engine (Technical TA)",
-    "3.1": "retail_hype_tracker (Retail Sentiment)",
-    "3.2": "pro_bias_analyst (Smart Money)",
-    "4.1": "whale_behavior_analyst (On-Chain Whale)",
-    "4.2": "liquidity_order_flow (Order Flow)",
-}
+_reg = get_registry()
+AGENT_WEIGHTS_DEFAULT: dict[str, float] = _reg.default_weights()
+AGENT_LABELS: dict[str, str] = {s.name: f"{s.name} ({s.label})" for s in _reg.all_specs()}
 
 # 5-Question weight delta rules
 # Format: (risk, horizon, signals, leverage, assets) -> {agent_id: delta}
@@ -71,7 +51,12 @@ _WEIGHT_RULES: list[tuple[str, str, str, str, str, dict[str, float]]] = [
         "*",
         "*",
         "*",
-        {"1.1": 0.10, "2.3": 0.05, "3.1": -0.03, "4.2": -0.05},
+        {
+            "monetary_sentinel": 0.10,
+            "technical_ta_engine": 0.05,
+            "retail_hype_tracker": -0.03,
+            "liquidity_order_flow": -0.05,
+        },
     ),
     (
         "conservative",
@@ -79,7 +64,12 @@ _WEIGHT_RULES: list[tuple[str, str, str, str, str, dict[str, float]]] = [
         "*",
         "*",
         "*",
-        {"1.1": 0.05, "2.3": 0.05, "3.1": -0.02, "4.2": -0.03},
+        {
+            "monetary_sentinel": 0.05,
+            "technical_ta_engine": 0.05,
+            "retail_hype_tracker": -0.02,
+            "liquidity_order_flow": -0.03,
+        },
     ),
     # === AGGRESSIVE profiles ===
     # Aggressive + short horizon: tilt → momentum, retail, whale
@@ -89,7 +79,12 @@ _WEIGHT_RULES: list[tuple[str, str, str, str, str, dict[str, float]]] = [
         "*",
         "*",
         "*",
-        {"2.1": 0.10, "4.2": 0.10, "1.1": -0.03, "1.2": -0.03},
+        {
+            "pattern_recognition_bot": 0.10,
+            "liquidity_order_flow": 0.10,
+            "monetary_sentinel": -0.03,
+            "news_narrative_miner": -0.03,
+        },
     ),
     (
         "aggressive",
@@ -97,22 +92,153 @@ _WEIGHT_RULES: list[tuple[str, str, str, str, str, dict[str, float]]] = [
         "*",
         "*",
         "*",
-        {"2.1": 0.05, "4.2": 0.05, "3.1": 0.03, "1.1": -0.02},
+        {
+            "pattern_recognition_bot": 0.05,
+            "liquidity_order_flow": 0.05,
+            "retail_hype_tracker": 0.03,
+            "monetary_sentinel": -0.02,
+        },
     ),
-    ("aggressive", "*", "*", "5x+", "*", {"2.1": 0.08, "4.2": 0.05, "3.1": 0.05, "1.2": -0.03}),
+    (
+        "aggressive",
+        "*",
+        "*",
+        "5x+",
+        "*",
+        {
+            "pattern_recognition_bot": 0.08,
+            "liquidity_order_flow": 0.05,
+            "retail_hype_tracker": 0.05,
+            "news_narrative_miner": -0.03,
+        },
+    ),
     # === SIGNAL preference profiles ===
-    ("*", "*", "technical", "*", "*", {"2.3": 0.10, "2.1": 0.05, "3.1": -0.05, "1.2": -0.05}),
-    ("*", "*", "onchain", "*", "*", {"4.1": 0.15, "4.2": 0.05, "2.3": -0.10, "2.1": -0.05}),
-    ("*", "*", "news", "*", "*", {"1.2": 0.15, "3.1": 0.05, "2.3": -0.10, "2.1": -0.05}),
-    ("*", "*", "sentiment", "*", "*", {"3.1": 0.15, "3.2": 0.05, "2.3": -0.10, "2.1": -0.05}),
-    ("*", "*", "mixed", "*", "*", {"1.2": 0.03, "3.1": 0.03, "3.2": 0.03, "2.3": -0.05}),
+    (
+        "*",
+        "*",
+        "technical",
+        "*",
+        "*",
+        {
+            "technical_ta_engine": 0.10,
+            "pattern_recognition_bot": 0.05,
+            "retail_hype_tracker": -0.05,
+            "news_narrative_miner": -0.05,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "onchain",
+        "*",
+        "*",
+        {
+            "whale_behavior_analyst": 0.15,
+            "liquidity_order_flow": 0.05,
+            "technical_ta_engine": -0.10,
+            "pattern_recognition_bot": -0.05,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "news",
+        "*",
+        "*",
+        {
+            "news_narrative_miner": 0.15,
+            "retail_hype_tracker": 0.05,
+            "technical_ta_engine": -0.10,
+            "pattern_recognition_bot": -0.05,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "sentiment",
+        "*",
+        "*",
+        {
+            "retail_hype_tracker": 0.15,
+            "pro_bias_analyst": 0.05,
+            "technical_ta_engine": -0.10,
+            "pattern_recognition_bot": -0.05,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "mixed",
+        "*",
+        "*",
+        {
+            "news_narrative_miner": 0.03,
+            "retail_hype_tracker": 0.03,
+            "pro_bias_analyst": 0.03,
+            "technical_ta_engine": -0.05,
+        },
+    ),
     # === LEVERAGE profiles ===
-    ("*", "*", "*", "1x", "*", {"2.3": 0.05, "1.1": 0.05, "3.1": -0.02, "4.2": -0.02}),
-    ("*", "*", "*", "3-5x", "*", {"2.1": 0.05, "3.1": 0.03, "4.2": 0.03, "1.1": -0.03}),
+    (
+        "*",
+        "*",
+        "*",
+        "1x",
+        "*",
+        {
+            "technical_ta_engine": 0.05,
+            "monetary_sentinel": 0.05,
+            "retail_hype_tracker": -0.02,
+            "liquidity_order_flow": -0.02,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "*",
+        "3-5x",
+        "*",
+        {
+            "pattern_recognition_bot": 0.05,
+            "retail_hype_tracker": 0.03,
+            "liquidity_order_flow": 0.03,
+            "monetary_sentinel": -0.03,
+        },
+    ),
     # === ASSET profiles ===
-    ("*", "*", "*", "*", "majors_only", {"2.3": 0.05, "3.1": -0.03, "4.1": -0.03}),
-    ("*", "*", "*", "*", "full_universe", {"3.1": 0.08, "3.2": 0.05, "4.1": 0.05, "2.3": -0.10}),
-    ("*", "*", "*", "*", "majors_alts", {"2.1": 0.03, "3.2": 0.03, "1.2": 0.02}),
+    (
+        "*",
+        "*",
+        "*",
+        "*",
+        "majors_only",
+        {
+            "technical_ta_engine": 0.05,
+            "retail_hype_tracker": -0.03,
+            "whale_behavior_analyst": -0.03,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "*",
+        "*",
+        "full_universe",
+        {
+            "retail_hype_tracker": 0.08,
+            "pro_bias_analyst": 0.05,
+            "whale_behavior_analyst": 0.05,
+            "technical_ta_engine": -0.10,
+        },
+    ),
+    (
+        "*",
+        "*",
+        "*",
+        "*",
+        "majors_alts",
+        {"pattern_recognition_bot": 0.03, "pro_bias_analyst": 0.03, "news_narrative_miner": 0.02},
+    ),
 ]
 
 # === Narrative labels for user-facing profile ===
@@ -228,7 +354,7 @@ class ProfileAgent:
             "4. The final weights will be re-normalized to sum 1.0\n"
             "5. Provide a concise reasoning string (1-2 sentences)\n"
             "6. Output valid JSON ONLY, no markdown:\n"
-            '{"deltas": {"2.1": 0.10, "2.3": -0.05}, "reasoning": "...", "narrative": "..."}'
+            '{"deltas": {"pattern_recognition_bot": 0.10, "technical_ta_engine": -0.05}, "reasoning": "...", "narrative": "..."}'
         )
 
     # ------------------------------------------------------------------

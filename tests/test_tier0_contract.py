@@ -13,7 +13,7 @@ def test_each_agent_emits_schema_version_and_id():
         {"status": "success", "systemic_beta_score": 85, "liquidity_regime": "risk_on"},
         "BTC/USDT",
     )
-    assert m["agent"] == "1.1"
+    assert m["agent"] == "monetary_sentinel"
     assert m["schema_version"] == CONTRACT_SCHEMA_VERSION
     assert m["Liquidity_Score"] == 85
     assert m["macro_regime_state"] == 2
@@ -23,7 +23,7 @@ def test_each_agent_emits_schema_version_and_id():
         {"status": "success", "breaker_score": 90, "breaker_state": "active"},
         "BTC/USDT",
     )
-    assert n["agent"] == "1.2"
+    assert n["agent"] == "news_narrative_miner"
     assert n["News_Impact_Score"] == 90
     assert n["Event_Type"] == "Black Swan"
 
@@ -38,17 +38,17 @@ def test_each_agent_emits_schema_version_and_id():
         },
         "BTC/USDT",
     )
-    assert ta["agent"] == "2.3"
+    assert ta["agent"] == "technical_ta_engine"
     assert ta["ta_indicators"]["rsi"] == 55.2
 
 
 def test_tier0_contracts_by_agent_last_wins():
     state = {
         "tier0_contracts": [
-            {"agent": "1.1", "Liquidity_Score": 10},
-            {"agent": "1.2", "News_Impact_Score": 20},
+            {"agent": "monetary_sentinel", "Liquidity_Score": 10},
+            {"agent": "news_narrative_miner", "News_Impact_Score": 20},
         ]
     }
     idx = tier0_contracts_by_agent(state)
-    assert idx["1.1"]["Liquidity_Score"] == 10
-    assert idx["1.2"]["News_Impact_Score"] == 20
+    assert idx["monetary_sentinel"]["Liquidity_Score"] == 10
+    assert idx["news_narrative_miner"]["News_Impact_Score"] == 20

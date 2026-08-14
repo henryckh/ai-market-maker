@@ -82,17 +82,7 @@ def llm_key_available(env: Mapping[str, str] | None = None) -> bool:
 
 
 def use_llm_arbitrator(env: Mapping[str, str] | None = None) -> bool:
-    """Return True when an LLM provider key is configured.
-
-    Legacy ``AI_MARKET_MAKER_USE_LLM=0`` forces False.
-    """
-    if env is None:
-        env = os.environ
-
-    old_flag = (env.get("AI_MARKET_MAKER_USE_LLM") or "").strip().lower()
-    if old_flag in ("0", "false", "no", "off"):
-        return False
-
+    """Return True when an LLM provider key is configured."""
     return bool(_read_key(env))
 
 

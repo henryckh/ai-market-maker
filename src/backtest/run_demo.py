@@ -212,9 +212,8 @@ def build_run_demo_parser() -> argparse.ArgumentParser:
         default=None,
         choices=("agent_llm", "weighted_convergence"),
         help=(
-            "Arbitrator mode: ``agent_llm`` (per-agent LLM → weighted arbitrator), "
-            "``weighted_convergence`` (deterministic, no LLM). "
-            "Overrides deploy config if set."
+            "Arbitrator mode for this run only (experiment override). "
+            "Deploy JSON is the strategy source of truth; omit this to use execution.use_llm_synthesis."
         ),
     )
     parser.add_argument(
@@ -293,23 +292,6 @@ def resolve_run_demo_symbols(
         pool = list(s.market.universe_symbols)
         sym_list = [str(args.ticker)] + [x for x in pool if x != str(args.ticker)]
         sym_list = sym_list[:u_sz]
-    # Optional: drop stablecoin legs for clearer "risk assets" comparisons.
-    # Stable exclusion removed in frozen config mode (explicit universe list should be curated).
-    if False and sym_list:
-
-        def _is_stable(sym: str) -> bool:
-            s = (sym or "").upper()
-            return any(
-                x in s for x in ("USDC/USDT", "USD1/USDT", "FDUSD/USDT", "TUSD/USDT", "USDP/USDT")
-            )
-
-        before = list(sym_list)
-        sym_list = [s for s in sym_list if not _is_stable(s)]
-        # Keep at least the primary ticker.
-        if not sym_list:
-            sym_list = [str(args.ticker)]
-        if before != sym_list:
-            print(f"[universe] excluded stables → {sym_list}", file=sys.stderr)
     if sym_list:
         if len(sym_list) < 2:
             parser.error("--symbols requires at least two pairs (comma-separated)")

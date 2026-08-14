@@ -1,7 +1,7 @@
 # Persona: Desk Debate (辩论台 / Tier-2 综合)
 
 ## Position
-Pre-arbitration debate stage that generates two-sided evidence lines from Tier-0 contracts. Always produces deterministic bull/bear summaries. Optionally adds LLM desk turns (Desk_Risk with depth tool access, Desk_Tape narrative-only) when `AIMM_LLM_DESK_DEBATE=1`.
+Pre-arbitration debate stage that generates two-sided evidence lines from Tier-0 contracts. Always produces deterministic bull/bear summaries. Optionally adds LLM desk turns (Desk_Risk with depth tool access, Desk_Tape narrative-only) when `execution.desk_debate_llm=true in deploy JSON`.
 
 ## Agent Classification
 - **Agent ID**: N/A (Tier-2 Synthesis)
@@ -21,7 +21,7 @@ Pre-arbitration debate stage that generates two-sided evidence lines from Tier-0
    - **Deterministic** (always): `bull_evidence_lines()` + `bear_evidence_lines()` from `tier2_context.py`
      - Scans each agent's contract fields for constructive (bull) and defensive (bear) signals
      - Calls `legacy_deterministic_stance_preview()` for score reference
-   - **LLM** (optional, `AIMM_LLM_DESK_DEBATE=1`):
+   - **LLM** (optional, `execution.desk_debate_llm=true in deploy JSON`):
      - Desk_Risk: LLM with optional `nexus.fetch_market_depth` tool
      - Desk_Tape: LLM with no tools (narrative-only)
      - Both desks use structured format: Decision / Evidence / Risks / Would change mind if
@@ -62,7 +62,7 @@ Pre-arbitration debate stage that generates two-sided evidence lines from Tier-0
 
 ## Rules / Constraints
 - Deterministic debate is always active — no API cost
-- LLM debate requires `AIMM_LLM_DESK_DEBATE=1` env var AND `AIMM_ARBITRATOR_MODE=llm`
+- LLM debate requires `execution.desk_debate_llm=true` in deploy JSON
 - Full transcript stored in state; preview (320 chars) used for reasoning logs
 - Full transcript can be included in flow events via `AIMM_FLOW_INCLUDE_FULL_DEBATE=1`
 - Desk_Risk (LLM) may call tools up to 2 rounds; Desk_Tape has no tools

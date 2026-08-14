@@ -1398,45 +1398,46 @@ def validate_ticker(ticker: str) -> bool:
         return False
 
 
-def build_workflow() -> StateGraph:
-    """Compile LangGraph: serial perception → proposal → risk → conditional execution.
+_TIER0_NODE_FNS: dict[str, Any] = {}
 
-    Node IDs are prefixed with ``desk_`` where needed so they do not collide with
-    :class:`HedgeFundState` keys (LangGraph requirement).
-    """
+
+def _tier0_node_fns() -> dict[str, Any]:
+    if not _TIER0_NODE_FNS:
+        _TIER0_NODE_FNS.update(
+            {
+                "monetary_sentinel": monetary_sentinel,
+                "news_narrative_miner": news_narrative_miner,
+                "pattern_recognition_bot": pattern_recognition_bot,
+                "statistical_alpha_engine": statistical_alpha_engine,
+                "technical_ta_engine": technical_ta_engine,
+                "retail_hype_tracker": retail_hype_tracker,
+                "pro_bias_analyst": pro_bias_analyst,
+                "whale_behavior_analyst": whale_behavior_analyst,
+                "liquidity_order_flow": liquidity_order_flow,
+            }
+        )
+    return _TIER0_NODE_FNS
+
+
+def build_workflow(*, tier0_nodes: list[str] | None = None) -> StateGraph:
+    """Perception desks come from deploy JSON ``agents.*.enabled`` (registry order)."""
+    from config.deploy_loader import resolve_tier0_graph_nodes
+
+    perception = _tier0_node_fns()
+    nodes = list(tier0_nodes) if tier0_nodes is not None else resolve_tier0_graph_nodes()
+    unknown = [n for n in nodes if n not in perception]
+    if unknown:
+        raise ValueError(f"unknown tier0 nodes: {unknown}")
+    if not nodes:
+        nodes = list(perception)
+
     workflow: StateGraph = StateGraph(HedgeFundState)
     workflow.add_node(
         "policy_orchestrator", _instrument_node("policy_orchestrator", policy_orchestrator)
     )
     workflow.add_node("desk_market_scan", _instrument_node("market_scan", market_scan))
-    # Tier-0 AIMM8 perception layer.
-    workflow.add_node("monetary_sentinel", _instrument_node("monetary_sentinel", monetary_sentinel))
-    workflow.add_node(
-        "news_narrative_miner",
-        _instrument_node("news_narrative_miner", news_narrative_miner),
-    )
-    workflow.add_node(
-        "pattern_recognition_bot",
-        _instrument_node("pattern_recognition_bot", pattern_recognition_bot),
-    )
-    workflow.add_node(
-        "statistical_alpha_engine",
-        _instrument_node("statistical_alpha_engine", statistical_alpha_engine),
-    )
-    workflow.add_node(
-        "technical_ta_engine",
-        _instrument_node("technical_ta_engine", technical_ta_engine),
-    )
-    workflow.add_node(
-        "retail_hype_tracker", _instrument_node("retail_hype_tracker", retail_hype_tracker)
-    )
-    workflow.add_node("pro_bias_analyst", _instrument_node("pro_bias_analyst", pro_bias_analyst))
-    workflow.add_node(
-        "whale_behavior_analyst", _instrument_node("whale_behavior_analyst", whale_behavior_analyst)
-    )
-    workflow.add_node(
-        "liquidity_order_flow", _instrument_node("liquidity_order_flow", liquidity_order_flow)
-    )
+    for node_id in nodes:
+        workflow.add_node(node_id, _instrument_node(node_id, perception[node_id]))
     workflow.add_node("desk_risk", _instrument_node("risk", risk))
     workflow.add_node("desk_debate", _instrument_node("desk_debate", desk_debate))
     workflow.add_node(
@@ -1454,19 +1455,8 @@ def build_workflow() -> StateGraph:
     workflow.add_node("audit", _instrument_node("audit", audit))
 
     workflow.set_entry_point("policy_orchestrator")
-    tier0_nodes = [
-        "monetary_sentinel",
-        "news_narrative_miner",
-        "pattern_recognition_bot",
-        "statistical_alpha_engine",
-        "technical_ta_engine",
-        "retail_hype_tracker",
-        "pro_bias_analyst",
-        "whale_behavior_analyst",
-        "liquidity_order_flow",
-    ]
     workflow.add_edge("policy_orchestrator", "desk_market_scan")
-    for node_id in tier0_nodes:
+    for node_id in nodes:
         workflow.add_edge("desk_market_scan", node_id)
         workflow.add_edge(node_id, "desk_risk")
     workflow.add_edge("desk_risk", "desk_debate")
@@ -1537,7 +1527,7 @@ def main():
         default=False,
         help=(
             "Load active deploy config from config/deploy.active.json. "
-            "Uses the effective_weights from the deployed configuration "
+            "Uses agents.*.weight from the deployed configuration "
             "as profile weights. Overrides --profile-id."
         ),
     )
@@ -1588,11 +1578,15 @@ def main():
 
     # Inject arbitrator_mode from deploy config (if loaded)
     if args.deploy:
-        from config.deploy_loader import get_arbitrator_mode
+        from config.deploy_loader import (
+            get_arbitrator_llm,
+            get_arbitrator_mode,
+        )
 
         deploy_arb_mode = get_arbitrator_mode()
         if deploy_arb_mode:
             state["arbitrator_mode"] = deploy_arb_mode
+        state["arbitrator_llm"] = get_arbitrator_llm()
     logger.debug("Initial state: %s", state)
 
     run_id = f"run-{args.ticker.replace('/', '-')}-{int(time.time())}"

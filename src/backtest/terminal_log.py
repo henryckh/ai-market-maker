@@ -13,17 +13,9 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, TextIO
 
-_AGENT_LABELS: dict[str, str] = {
-    "1.1": "Macro Sentinel",
-    "1.2": "News & Narrative",
-    "2.1": "Pattern Recognition",
-    "2.3": "Technical TA",
-    "2.2": "Statistical Alpha",
-    "3.1": "Retail Hype",
-    "3.2": "Pro Bias",
-    "4.1": "Whale Behavior",
-    "4.2": "Liquidity / Flow",
-}
+from agents.registry import get_registry
+
+_AGENT_LABELS: dict[str, str] = get_registry().labels()
 
 _CONFIGURED = False
 _API_WARNED = False
@@ -210,7 +202,7 @@ def _extract_agent_rows(
         if isinstance(pw, dict) and pw:
             active = [str(a) for a, w in pw.items() if float(w or 0) > 0]
     if not active:
-        active = ["2.3", "2.1", "1.1"]
+        active = ["technical_ta_engine", "pattern_recognition_bot", "monetary_sentinel"]
 
     by_id: dict[str, dict[str, Any]] = {}
 
@@ -304,16 +296,8 @@ def _extract_agent_rows(
     return sorted(by_id.values(), key=lambda r: order.get(str(r["agent_id"]), 99))
 
 
-def _should_print_bar(*, symbol: str, primary_symbol: str, action: str, confidence: float) -> bool:
-    if _terminal_all_symbols() or symbol == primary_symbol:
-        pass
-    else:
-        return False
-    if action in ("BUY", "SELL"):
-        return True
-    if confidence >= 0.12:
-        return True
-    return False
+def _should_print_bar(*, symbol: str, primary_symbol: str) -> bool:
+    return _terminal_all_symbols() or symbol == primary_symbol
 
 
 def print_run_header(
@@ -325,6 +309,7 @@ def print_run_header(
     profile_weights: dict[str, float] | None = None,
     ta_warmup_bars: int = 0,
     eval_bars: int | None = None,
+    use_llm: bool = False,
     stream: TextIO | None = None,
 ) -> None:
     if not backtest_terminal_log_enabled():
@@ -339,7 +324,8 @@ def print_run_header(
         parts = [
             f"{k}×{float(v):.2f}" for k, v in sorted(profile_weights.items(), key=lambda x: -x[1])
         ]
-        desks = f"\n desks:   {', '.join(parts)} (LLM CoT)"
+        llm_note = " (LLM CoT)" if use_llm else ""
+        desks = f"\n desks:   {', '.join(parts)}{llm_note}"
     ev = eval_bars if eval_bars is not None else max(0, total_bars - ta_warmup_bars)
     warmup_line = (
         f"\n warmup:  {ta_warmup_bars} bars (TA context only — no LLM, no trades)"
@@ -359,7 +345,7 @@ def print_run_header(
         f"{bars_line}"
         f"{warmup_line}"
         f"{desks}\n"
-        f" transcript: {sym_mode} │ BUY/SELL + high-confidence bars\n"
+        f" transcript: {sym_mode} │ every bar\n"
         f"{'█' * 72}",
         file=out,
         flush=True,
@@ -386,9 +372,7 @@ def print_bar_decision(
     if not backtest_terminal_log_enabled():
         return
     primary = primary_symbol or symbol
-    if not _should_print_bar(
-        symbol=symbol, primary_symbol=primary, action=action, confidence=confidence
-    ):
+    if not _should_print_bar(symbol=symbol, primary_symbol=primary):
         return
 
     out = stream or sys.stderr
