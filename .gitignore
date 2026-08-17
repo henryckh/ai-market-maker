@@ -34,9 +34,20 @@ web/tsconfig.tsbuildinfo
 .benchmarks/
 .ci_install_test/
 
-# Local OHLCV CSV cache (see backtest.ohlcv_csv_cache)
-data/ohlcv/
+# Local Data caches
+# data/ohlcv/
+# data/derivatives/
+# data/news_sentiment/
+# data/macro/
+# data/fixtures/
+data/news_sentiment/raw/
 .cache
 
 # Local output
 out/
+
+# experimental configs
+config/experiments/
+config/grid/
+
+scripts/

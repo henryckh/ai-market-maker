@@ -403,7 +403,7 @@ export default function StrategyStudio({
       }
     } catch {
       // Fallback: basic offline parsing
-      const tickerMatch = text.match(/(BTC|ETH|SOL|BNB|XRP|ADA|DOGE|AVAX|DOT|LINK|MATIC|ARB|OP|SUI|APT)/i);
+      const tickerMatch = text.match(/(BTC|ETH|SOL|BNB|XRP|ADA|DOGE|AVAX|DOT|LINK|ARB|OP|SUI|APT)/i);
       const ticker = tickerMatch ? `${tickerMatch[1].toUpperCase()}/USDT` : config.ticker;
       const isTrend = /trend|follow/i.test(text);
       const isReversion = /revert|reversal|mean/i.test(text);

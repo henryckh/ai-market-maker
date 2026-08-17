@@ -143,6 +143,26 @@ def load_bars_csv_only(
     return loaded[-limit:]
 
 
+def load_ohlcv_range_local(
+    symbol: str,
+    *,
+    timeframe: str,
+    since_ms: int,
+    until_ms: int,
+    cache_dir: Path,
+) -> list[list[float]]:
+    """Offline range slice from pinned CSV (no network)."""
+    path = ohlcv_cache_path(cache_dir, symbol, timeframe)
+    loaded = load_ohlcv_csv(path)
+    out = [row for row in loaded if since_ms <= float(row[0]) <= until_ms]
+    if len(out) < 2:
+        raise ValueError(
+            f"{path} has no bars in [{since_ms}, {until_ms}] "
+            f"(file span {int(loaded[0][0])}..{int(loaded[-1][0])})"
+        )
+    return out
+
+
 def ensure_range_cached(
     symbol: str,
     *,

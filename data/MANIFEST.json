@@ -1,0 +1,235 @@
+{
+  "updated_utc": "2026-08-17T13:45:10.932450+00:00",
+  "fear_greed": {
+    "path": "data/macro/fear_greed_daily.csv",
+    "rows": 3114,
+    "since": "2018-02-01",
+    "until": "2026-08-15",
+    "source": "alternative.me/fng",
+    "sha256": "1102a6167a0cad9cedcedf77d873670e3fcdf5b9a2dee59f333283d3dbbd2aa4"
+  },
+  "fred": {
+    "path": "data/macro/fred_daily.csv",
+    "rows": 2038,
+    "since": "2021-01-01",
+    "until": "2026-07-31",
+    "source": "fred_public_csv",
+    "columns": [
+      "vix",
+      "us_10y_yield_pct",
+      "effective_fed_funds_pct",
+      "trade_weighted_usd_index",
+      "sp500_index",
+      "wti_crude_usd_per_bbl"
+    ],
+    "note": "Weekend/holiday rows carry the last print. HY OAS is sparse and unused.",
+    "sha256": "6bc9d13921e443597a29d7fcbd70aa78c65a50ae62e5d509a0947e970978fc34"
+  },
+  "defillama_liquidity": {
+    "path": "data/macro/defillama_liquidity_daily.csv",
+    "rows": 2038,
+    "since": "2021-01-01",
+    "until": "2026-07-31",
+    "source": "defillama_public_aggregate_lag1",
+    "note": "CSV is already lag-1; HistoricalNexusProvider looks up by bar date.",
+    "sha256": "b38caf9499ca66f327e49d2e2804ea3676db8dfc10674fe724729d19e6b9c8ef"
+  },
+  "ohlcv_vision": [
+    {
+      "symbol": "ADA/USDT",
+      "vision_symbol": "ADAUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/ADA_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "a6effc44cea6dfc30c58cda2dfcb7dd70aa6ab4d16e3605f02b6633146bfe706"
+    },
+    {
+      "symbol": "APT/USDT",
+      "vision_symbol": "APTUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/APT_USDT_1d.csv",
+      "bars": 1382,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "937cb3e8bb85f7e259754bbf38275881ae67243345029ca2c0f293dd1d39468d"
+    },
+    {
+      "symbol": "ARB/USDT",
+      "vision_symbol": "ARBUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/ARB_USDT_1d.csv",
+      "bars": 1227,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "f0b84bde4dab5f6549820490e2d8ad67731441ea5201fffa90635d2d1021cc10"
+    },
+    {
+      "symbol": "ATOM/USDT",
+      "vision_symbol": "ATOMUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/ATOM_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "784b1b9023626c0f2ee7115e8b680720e4f6ca921f62c55f3660c5e6a6522de1"
+    },
+    {
+      "symbol": "AVAX/USDT",
+      "vision_symbol": "AVAXUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/AVAX_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "0f315e561ffb81073b2ed16cadd249d4d76bb144d73bc4b7efb8985952802d55"
+    },
+    {
+      "symbol": "BNB/USDT",
+      "vision_symbol": "BNBUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/BNB_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "450fc0fefa91524188dba7d4238d34b494797e9513bac39c3bedb0d25c897133"
+    },
+    {
+      "symbol": "BTC/USDT",
+      "vision_symbol": "BTCUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/BTC_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "243e63e121eb9a223f7cd04e3964121a62ea6af87d46b1e659ef026882478bd4"
+    },
+    {
+      "symbol": "DOGE/USDT",
+      "vision_symbol": "DOGEUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/DOGE_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "5deb8249409b52d81f636110b7307a0b8dbe10a66e1c1770e275cf83b978a2ec"
+    },
+    {
+      "symbol": "DOT/USDT",
+      "vision_symbol": "DOTUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/DOT_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "6a7fd483f8d0400ea61b6345216d3dac1bce09d25f8e1a58bff7194074999923"
+    },
+    {
+      "symbol": "ETH/USDT",
+      "vision_symbol": "ETHUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/ETH_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "b25e7b39096e317aca28cf0137ce794afed800d23cfa8f40945a62ab59c3db2a"
+    },
+    {
+      "symbol": "FIL/USDT",
+      "vision_symbol": "FILUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/FIL_USDT_1d.csv",
+      "bars": 2033,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "e1cf45047e31d1a9e660951c24bd779a59eb1e503e3ca025d56ec20bca878002"
+    },
+    {
+      "symbol": "LINK/USDT",
+      "vision_symbol": "LINKUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/LINK_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "76c78829c94a63254608a6f8f904851078f28f16f3184b0286afcbe060c444fa"
+    },
+    {
+      "symbol": "LTC/USDT",
+      "vision_symbol": "LTCUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/LTC_USDT_1d.csv",
+      "bars": 2033,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "b9e63fd0292218ba770411df23c846819248f0ce9353130f2cfe0faf35cd7525"
+    },
+    {
+      "symbol": "NEAR/USDT",
+      "vision_symbol": "NEARUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/NEAR_USDT_1d.csv",
+      "bars": 2033,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "17bfd3e9bd7f559b9fcf594e9c652ed434e829be13d5e26ae243951b0bf679ab"
+    },
+    {
+      "symbol": "OP/USDT",
+      "vision_symbol": "OPUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/OP_USDT_1d.csv",
+      "bars": 1522,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "bb497740a0860a5a9e31d38db9765375480a15fa495383545f22d46eaca6dc8e"
+    },
+    {
+      "symbol": "SOL/USDT",
+      "vision_symbol": "SOLUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/SOL_USDT_1d.csv",
+      "bars": 2033,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "462d3e226cc341260dbf3c2c8918dadbb887366853fb4e27ef4327284acabbc1"
+    },
+    {
+      "symbol": "SUI/USDT",
+      "vision_symbol": "SUIUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/SUI_USDT_1d.csv",
+      "bars": 1186,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "50597d15a98c4540fac8cbaca79926ff2104b366383bc205672a07f568e60469"
+    },
+    {
+      "symbol": "UNI/USDT",
+      "vision_symbol": "UNIUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/UNI_USDT_1d.csv",
+      "bars": 2038,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "4eba0ddf0a507f2acae8e1f5cd5e1e601013b2c6877c982cdb1a5997319697c6"
+    },
+    {
+      "symbol": "XRP/USDT",
+      "vision_symbol": "XRPUSDT",
+      "timeframe": "1d",
+      "path": "data/ohlcv/XRP_USDT_1d.csv",
+      "bars": 2033,
+      "source": "binance_vision_monthly_klines",
+      "sha256": "280508558e544c44034363c9039b4e574e6575cf6c873101aecdbc417b601cc2"
+    }
+  ],
+  "funding": {
+    "path": "data/derivatives/funding_all.csv",
+    "rows": 113847,
+    "source": "binance_vision_monthly_fundingRate",
+    "sha256": "ff78dad1a2a8db6180ba1824868bc748be6a5624a95aa2551e22a0bf66e3da50"
+  },
+  "cryptovision_daily": {
+    "path": "data/news_sentiment/daily_by_coin.csv",
+    "titles": "data/news_sentiment/daily_titles.jsonl",
+    "rows": 22061,
+    "title_rows": 22051,
+    "since": "2017-08-17",
+    "until": "2025-08-27",
+    "source": "CryptoVision Mendeley 10.17632/wvjjxr8bxx.2",
+    "license": "CC BY 4.0",
+    "sha256": "5f4a3fe622975b36482c9dec461035c48b5344d5eb3f331e807839278caafd0c"
+  },
+  "fixtures": {
+    "path": "data/fixtures/nexus_daily.jsonl",
+    "rows": 3282,
+    "since": "2017-08-17",
+    "until": "2026-08-15",
+    "source": "offline_fixtures",
+    "sha256": "ca9805d36c9c98dfbf4aec1c54d98fd0ab27160f655f3a4ffb7b59e311423651"
+  }
+}

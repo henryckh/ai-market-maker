@@ -238,33 +238,104 @@ def _ohlcv_summary(ohlcv: list[Any], max_bars: int = 30) -> str:
     try:
         vols = [float(b[5]) for b in window if len(b) > 5]
         if vols:
-            lines.append(f"Avg volume: {sum(vols) / len(vols):.0f}")
+            avg_v = sum(vols) / len(vols)
+            last_v = vols[-1]
+            ratio = (last_v / avg_v) if avg_v else 0.0
+            lines.append(f"Volume: last {last_v:.0f} vs avg {avg_v:.0f} ({ratio:.2f}x)")
     except (IndexError, TypeError, ValueError):
         pass
     return "\n".join(lines)
 
 
+def _endpoint_data(endpoints: dict[str, Any], name: str) -> dict[str, Any] | None:
+    row = endpoints.get(name)
+    if not isinstance(row, dict) or not row.get("ok"):
+        return None
+    data = row.get("data")
+    return data if isinstance(data, dict) else None
+
+
+def _news_items_from_nexus(nexus: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = nexus.get("news")
+    if isinstance(raw, list):
+        return [n for n in raw if isinstance(n, dict)]
+    endpoints = nexus.get("endpoints")
+    if not isinstance(endpoints, dict):
+        return []
+    data = _endpoint_data(endpoints, "news")
+    if not data:
+        return []
+    items = data.get("news")
+    if isinstance(items, list):
+        return [n for n in items if isinstance(n, dict)]
+    return []
+
+
 def _build_nexus_context(state: dict[str, Any]) -> str:
-    """Extract Nexus bundle from shared_memory."""
+    """Extract Nexus bundle from shared_memory (live or historical endpoints)."""
     sm = state.get("shared_memory") or {}
     nexus = sm.get("nexus") or {}
     if not isinstance(nexus, dict):
         return ""
-    parts = []
-    news = nexus.get("news")
-    if isinstance(news, list) and news:
-        for n in news[:5]:
-            if isinstance(n, dict):
-                title = n.get("title", "")[:100]
-                sentiment = n.get("sentiment", "")
-                if title:
-                    parts.append(f"  - [{sentiment}] {title}")
+    parts: list[str] = []
+    endpoints = nexus.get("endpoints") if isinstance(nexus.get("endpoints"), dict) else {}
+
+    as_of = nexus.get("as_of_date")
+    if as_of:
+        parts.append(f"As-of date: {as_of} (offline historical; do not use later information)")
+
+    mo = _endpoint_data(endpoints, "market_overview") if endpoints else None
+    sent = _endpoint_data(endpoints, "sentiment") if endpoints else None
+    fng = None
+    fng_label = ""
+    if isinstance(mo, dict):
+        fng = mo.get("fear_greed_index")
+        fng_label = str(mo.get("fear_greed_label") or "")
+    if fng is None and isinstance(sent, dict):
+        fng = sent.get("fear_greed")
+        fng_label = str(sent.get("fear_greed_label") or "")
+    if fng is not None:
+        parts.append(f"Fear & Greed: {fng} {fng_label}".rstrip())
+
+    if isinstance(mo, dict):
+        macro_bits: list[str] = []
+        if mo.get("vix") is not None:
+            macro_bits.append(f"VIX {mo.get('vix')}")
+        if mo.get("effective_fed_funds_pct") is not None:
+            macro_bits.append(f"fed funds {mo.get('effective_fed_funds_pct')}%")
+        if mo.get("us_10y_yield_pct") is not None:
+            macro_bits.append(f"US10Y {mo.get('us_10y_yield_pct')}%")
+        if mo.get("trade_weighted_usd_index") is not None:
+            macro_bits.append(f"DXY {mo.get('trade_weighted_usd_index')}")
+        if mo.get("stablecoin_change_7d_pct") is not None:
+            macro_bits.append(f"stablecoin 7d {mo.get('stablecoin_change_7d_pct')}%")
+        if mo.get("all_chain_tvl_change_7d_pct") is not None:
+            macro_bits.append(f"TVL 7d {mo.get('all_chain_tvl_change_7d_pct')}%")
+        if macro_bits:
+            parts.append("Macro: " + ", ".join(macro_bits))
+
+    for n in _news_items_from_nexus(nexus)[:5]:
+        title = str(n.get("title") or "")[:120]
+        sentiment = n.get("sentiment", "")
+        if title:
+            parts.append(f"  - [{sentiment}] {title}")
+
     funding = nexus.get("funding")
+    if funding is None and endpoints:
+        oi = _endpoint_data(endpoints, "oi_top_ranking")
+        positions = None
+        if isinstance(oi, dict):
+            inner = oi.get("data") if isinstance(oi.get("data"), dict) else oi
+            if isinstance(inner, dict):
+                positions = inner.get("positions")
+        if isinstance(positions, list) and positions and isinstance(positions[0], dict):
+            funding = positions[0].get("funding_rate")
     if funding is not None:
         parts.append(f"Funding rate: {funding}")
-    oi = nexus.get("open_interest") or nexus.get("oi")
-    if oi is not None:
-        parts.append(f"Open interest: {oi}")
+
+    oi_val = nexus.get("open_interest") or nexus.get("oi")
+    if oi_val is not None:
+        parts.append(f"Open interest: {oi_val}")
     onchain = nexus.get("onchain")
     if isinstance(onchain, dict):
         for k, v in onchain.items():
@@ -417,6 +488,9 @@ def _build_agent_prompt(
         "### Critical Rules:\n"
         "- The deterministic analysis is **context only**. Do NOT copy it verbatim.\n"
         "- You must reason from the raw market data and produce your OWN assessment.\n"
+        "- If Nexus Data includes Fear & Greed, funding, or headlines, treat them as "
+        "as-of facts for this bar. Extreme fear (F&G ≤ 25) is a risk-off tilt; "
+        "extreme greed (≥ 75) is a risk-on tilt. Do not ignore them for OHLCV alone.\n"
         "- Reply with a single JSON object only. No markdown fences, no preamble, "
         "no <think> blocks.\n"
         "- Required fields (use these types; fill every key):\n"

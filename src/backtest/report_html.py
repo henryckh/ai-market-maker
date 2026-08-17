@@ -566,6 +566,7 @@ def _params_section(rc: dict[str, Any], summary: dict[str, Any]) -> str:
         ("Take profit %", rc.get("take_profit_pct")),
         ("Stop loss %", rc.get("stop_loss_pct")),
         ("Profile ID", rc.get("profile_id") or "—"),
+        ("Setup", rc.get("deploy_description") or "—"),
         ("Deploy path", rc.get("deploy_path") or "—"),
         ("Source", rc.get("source_description")),
         ("Instrument", summary.get("instrument")),
@@ -749,7 +750,7 @@ def _fill_quality_section(fq: dict[str, Any], fill_model: str) -> str:
 def _quality_section(summary: dict[str, Any]) -> str:
     qr = summary.get("quality_report") or {}
     if not qr:
-        return '<p class="note">No quality report attached. Re-run with <code>run_demo</code>.</p>'
+        return '<p class="note">No quality report attached. Re-run with <code>python -m backtest run</code>.</p>'
 
     overall = qr.get("overall_passed")
     passed = qr.get("passed_checks")
@@ -1252,10 +1253,14 @@ code {{ background: var(--table-head); padding: 2px 6px; border-radius: 4px; fon
       <table class="metrics-table">{metrics_table}</table>
     </div>
     <div class="card">
-      <h2>Equity Curve vs Benchmark</h2>
+      <h2>Equity vs BTC buy-and-hold</h2>
+      <p class="note" style="margin-top:-8px;margin-bottom:12px">
+        Equity marks open positions to each bar close, so the line moves with the asset while you are in.
+        Amber is BTC buy-and-hold from the same starting cash.
+      </p>
       <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
       <div class="legend">
-        <span class="leg-item"><span class="swatch" style="background:var(--accent)"></span> Strategy Equity</span>
+        <span class="leg-item"><span class="swatch" style="background:var(--accent)"></span> Equity</span>
         <span class="leg-item"><span class="swatch" style="background:var(--amber)"></span> {bench_sym_esc} Buy &amp; Hold</span>
       </div>
     </div>
@@ -1337,7 +1342,7 @@ function buildCharts() {{
   const eqCtx = document.getElementById('equityChart');
   const ddCtx = document.getElementById('drawdownChart');
   const datasets = [{{
-    label: 'Strategy',
+    label: 'Equity',
     data: d.strategy,
     borderColor: '#2563eb',
     backgroundColor: 'rgba(37,99,235,0.08)',

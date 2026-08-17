@@ -1,7 +1,10 @@
-"""Multi-window **anchored** backtests: fixed calendar ranges (not rolling “last N bars”).
+"""Multi-window historical evaluation (library).
 
-Use this to answer “did the system trade, flatten, and how did it behave in named regimes?”
-across history. Outcomes are **empirical** (sampled periods), not proof of future edge.
+Use via::
+
+    python -m backtest --mode windows ...
+
+Functions: ``run_window``, ``run_suite``, ``report_to_markdown``.
 """
 
 from __future__ import annotations
@@ -17,6 +20,24 @@ from backtest.bars import fetch_ccxt_ohlcv_range, iso_utc_to_ms, nominal_interva
 from backtest.loop import run_multi_step_backtest
 
 
+def _deploy_leverage(deploy_config: dict[str, Any] | None) -> float | None:
+    """Windows path must honor deploy JSON leverage (not paper.leverage 1.5)."""
+    if not isinstance(deploy_config, dict):
+        return None
+    raw = deploy_config.get("leverage")
+    if raw is None:
+        exec_cfg = deploy_config.get("execution")
+        if isinstance(exec_cfg, dict):
+            raw = exec_cfg.get("leverage")
+    if raw is None:
+        return None
+    try:
+        lev = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return lev if lev >= 1.0 else None
+
+
 @dataclass(frozen=True)
 class HistoryWindowSpec:
     """One reproducible evaluation window (UTC calendar)."""
@@ -28,23 +49,50 @@ class HistoryWindowSpec:
     timeframe: str = "1d"
 
 
-# Default suite: six-month slices, daily bars — enough steps for entries/exits without huge LLM cost.
+# Default suite: six-month daily slices.
+WINDOW_2021_H2 = HistoryWindowSpec(
+    id="2021_h2",
+    label="2021 H2 (late bull)",
+    since="2021-07-01",
+    until="2021-12-31",
+)
+WINDOW_2022_H1 = HistoryWindowSpec(
+    id="2022_h1",
+    label="2022 H1 (macro risk-off)",
+    since="2022-01-01",
+    until="2022-06-30",
+)
+WINDOW_2025_H1 = HistoryWindowSpec(
+    id="2025_h1",
+    label="2025 H1 (later OOS)",
+    since="2025-01-01",
+    until="2025-06-30",
+)
+
 DEFAULT_DAILY_WINDOWS: tuple[HistoryWindowSpec, ...] = (
+    WINDOW_2021_H2,
+    WINDOW_2022_H1,
     HistoryWindowSpec(
-        id="2022_h1",
-        label="2022 H1 (macro risk-off)",
-        since="2022-01-01",
-        until="2022-06-30",
+        id="2022_h2",
+        label="2022 H2 (FTX / risk-off)",
+        since="2022-07-01",
+        until="2022-12-31",
     ),
     HistoryWindowSpec(
         id="2023_h1",
-        label="2023 H1",
+        label="2023 H1 (recovery)",
         since="2023-01-01",
         until="2023-06-30",
     ),
     HistoryWindowSpec(
+        id="2023_h2",
+        label="2023 H2",
+        since="2023-07-01",
+        until="2023-12-31",
+    ),
+    HistoryWindowSpec(
         id="2024_h1",
-        label="2024 H1",
+        label="2024 H1 (ETF / bull)",
         since="2024-01-01",
         until="2024-06-30",
     ),
@@ -54,6 +102,19 @@ DEFAULT_DAILY_WINDOWS: tuple[HistoryWindowSpec, ...] = (
         since="2024-07-01",
         until="2024-12-31",
     ),
+    WINDOW_2025_H1,
+    HistoryWindowSpec(
+        id="2025_h2",
+        label="2025 H2",
+        since="2025-07-01",
+        until="2025-12-31",
+    ),
+)
+
+RELEASE_DAILY_WINDOWS: tuple[HistoryWindowSpec, ...] = (
+    WINDOW_2021_H2,
+    WINDOW_2022_H1,
+    WINDOW_2025_H1,
 )
 
 # Coarser bars for LLM-capped runs (fewer graph steps).
@@ -96,15 +157,32 @@ def load_equity_file(path: Path) -> list[dict[str, Any]]:
 
 
 def summarize_execution_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
-    buys = sum(1 for t in trades if str(t.get("side", "")).lower() == "buy")
-    sells = sum(1 for t in trades if str(t.get("side", "")).lower() == "sell")
+    def _side(t: dict[str, Any]) -> str:
+        raw = str(t.get("side") or "").lower()
+        if raw in ("buy", "long"):
+            return "buy"
+        if raw in ("sell", "short"):
+            return "sell"
+        try:
+            d = int(t.get("direction") or 0)
+        except (TypeError, ValueError):
+            d = 0
+        if d > 0:
+            return "buy"
+        if d < 0:
+            return "sell"
+        return ""
+
+    sides = [_side(t) for t in trades]
+    buys = sum(1 for s in sides if s == "buy")
+    sells = sum(1 for s in sides if s == "sell")
     return {
         "fills": len(trades),
         "buy_fills": buys,
         "sell_fills": sells,
-        "opened_position": buys > 0,
-        "reduced_or_flat": sells > 0,
-        "round_trip_evidence": buys > 0 and sells > 0,
+        "opened_position": buys > 0 or sells > 0,
+        "reduced_or_flat": sells > 0 or buys > 0,
+        "round_trip_evidence": len(trades) > 0,
     }
 
 
@@ -140,6 +218,7 @@ def compute_quality_report(
         trade_count=tc,
         profit_factor=profit_factor,
         trades=trades,
+        require_min_trades=False,
     ).to_dict()
 
 
@@ -148,6 +227,47 @@ def _infer_interval_sec(bars: list[list[float]], timeframe: str) -> int:
         dt_ms = float(bars[1][0] - bars[0][0])
         return max(60, int(dt_ms / 1000.0))
     return nominal_interval_sec_for_timeframe(timeframe)
+
+
+def _load_window_bars(
+    ticker: str,
+    *,
+    timeframe: str,
+    since_ms: int,
+    until_ms: int,
+    exchange_id: str,
+    csv_only: bool,
+    cache_dir: Path | None,
+) -> list[list[float]]:
+    """Prefer pinned local OHLCV; optionally fall back to CCXT."""
+    from pathlib import Path as _Path
+
+    from backtest.ohlcv_csv_cache import load_ohlcv_range_local
+
+    root = _Path(cache_dir) if cache_dir is not None else _Path("data/ohlcv")
+    # accept either data/ohlcv or parent data/
+    if root.name != "ohlcv" and (root / "ohlcv").is_dir():
+        root = root / "ohlcv"
+    try:
+        return load_ohlcv_range_local(
+            ticker,
+            timeframe=timeframe,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            cache_dir=root,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        if csv_only:
+            raise RuntimeError(
+                f"csv_only=True but local OHLCV unavailable for {ticker}: {e}"
+            ) from e
+        return fetch_ccxt_ohlcv_range(
+            ticker,
+            timeframe=timeframe,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            exchange_id=exchange_id,
+        )
 
 
 def run_window(
@@ -170,24 +290,31 @@ def run_window(
     forward_validate: bool = False,
     forward_oos_bars: int = 30,
     deploy_config: dict[str, Any] | None = None,
+    csv_only: bool = True,
+    cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     since_ms = iso_utc_to_ms(spec.since)
     last_day_ms = iso_utc_to_ms(spec.until)
     # Inclusive through end of ``until`` calendar day (UTC).
     until_ms = last_day_ms + 86_400_000 - 1
 
-    bars = fetch_ccxt_ohlcv_range(
+    bars = _load_window_bars(
         ticker,
         timeframe=spec.timeframe,
         since_ms=since_ms,
         until_ms=until_ms,
         exchange_id=exchange,
+        csv_only=csv_only,
+        cache_dir=cache_dir,
     )
-    max_steps: int | None = None
-    if use_llm:
-        max_steps = max(2, int(llm_max_steps))
-        if len(bars) > max_steps:
-            bars = bars[-max_steps:]
+    # Calendar windows keep every bar. The LLM step cap is a `run` cost control;
+    # chopping H1 to ~120 then subtracting TA warmup left ~70 eval bars and
+    # failed the 90-bar quality gate.
+    if use_llm and int(llm_max_steps or 0) > 0 and len(bars) > int(llm_max_steps):
+        print(
+            f"  [{spec.id}] {len(bars)} bars (LLM cap {llm_max_steps} ignored for calendar window)",
+            file=sys.stderr,
+        )
 
     interval_sec = _infer_interval_sec(bars, spec.timeframe)
     interval_sec = max(interval_sec, nominal_interval_sec_for_timeframe(spec.timeframe))
@@ -214,6 +341,7 @@ def run_window(
             take_profit_pct=take_profit_pct,
             stop_loss_pct=stop_loss_pct,
             max_hold_bars=max_hold_bars,
+            leverage=_deploy_leverage(deploy_config),
             deploy_config=deploy_config,
         )
 
@@ -232,6 +360,7 @@ def run_window(
             take_profit_pct=take_profit_pct,
             stop_loss_pct=stop_loss_pct,
             max_hold_bars=max_hold_bars,
+            leverage=_deploy_leverage(deploy_config),
             deploy_config=deploy_config,
         )
 
@@ -274,6 +403,7 @@ def run_window(
         take_profit_pct=take_profit_pct,
         stop_loss_pct=stop_loss_pct,
         max_hold_bars=max_hold_bars,
+        leverage=_deploy_leverage(deploy_config),
         deploy_config=deploy_config,
     )
     trades = load_trades_file(res.trades_path)
@@ -346,12 +476,48 @@ def build_aggregate(windows: list[dict[str, Any]]) -> dict[str, Any]:
                     pass
     beat_bh = sum(1 for e in excess if e > 0.0)
 
-    all_pass = all(w.get("quality", {}).get("overall_passed", True) for w in windows)
+    sharpes: list[float] = []
+    dds: list[float] = []
+    pfs: list[float] = []
+    for w in windows:
+        m = w.get("metrics") if isinstance(w.get("metrics"), dict) else {}
+        raw_s = m.get("sharpe")
+        if raw_s is None:
+            raw_s = m.get("sharpe_ratio")
+        for raw, bucket in (
+            (raw_s, sharpes),
+            (m.get("max_drawdown_pct"), dds),
+            (m.get("profit_factor"), pfs),
+        ):
+            if raw is None:
+                continue
+            try:
+                bucket.append(float(raw))
+            except (TypeError, ValueError):
+                pass
+
+    from backtest.validation import SampleSizeCheck, validate_sample_size
+
+    suite_trades = 0
+    suite_bars: list[int] = []
+    for w in windows:
+        suite_bars.append(int(w.get("bars_used") or 0))
+        ex = w.get("execution") if isinstance(w.get("execution"), dict) else {}
+        suite_trades += int((ex or {}).get("fills") or 0)
+    min_bars = min(suite_bars) if suite_bars else 0
+    suite_ss = validate_sample_size(min_bars, suite_trades)
+    bars_ok_all = all(b >= SampleSizeCheck._MIN_BARS for b in suite_bars) if suite_bars else False
+    suite_ss_passed = bool(bars_ok_all and suite_ss.min_trades_ok)
+
+    window_pass = all(w.get("quality", {}).get("overall_passed", True) for w in windows)
+    all_pass = window_pass and suite_ss_passed
     sample_warnings = [
         w.get("quality", {}).get("sample_size", {}).get("warning", "")
         for w in windows
         if w.get("quality", {}).get("sample_size", {}).get("warning")
     ]
+    if not suite_ss_passed and suite_ss.warning:
+        sample_warnings.append(f"suite: {suite_ss.warning}")
     pl_warnings = [
         w.get("quality", {}).get("profit_loss_ratio", {}).get("warning", "")
         for w in windows
@@ -377,6 +543,16 @@ def build_aggregate(windows: list[dict[str, Any]]) -> dict[str, Any]:
         "pct_windows_beat_buy_hold_equity": round(beat_bh / n, 4) if n else 0.0,
         "quality": {
             "all_windows_passed": all_pass,
+            "suite_sample_size": {
+                "min_window_bars": min_bars,
+                "total_trades": suite_trades,
+                "min_bars": SampleSizeCheck._MIN_BARS,
+                "min_trades": SampleSizeCheck._MIN_TRADES,
+                "min_bars_ok": bars_ok_all,
+                "min_trades_ok": suite_ss.min_trades_ok,
+                "passed": suite_ss_passed,
+                "warning": None if suite_ss_passed else suite_ss.warning,
+            },
             "sample_size_warnings": sample_warnings[:3],  # cap output
             "profit_loss_warnings": pl_warnings[:3],
             "exit_reason_warnings": exit_warnings[:3],
@@ -386,6 +562,12 @@ def build_aggregate(windows: list[dict[str, Any]]) -> dict[str, Any]:
         agg["mean_benchmark_buy_hold_equity_return_pct"] = round(sum(bh_eq) / len(bh_eq), 4)
     if excess:
         agg["mean_excess_return_vs_buy_hold_equity_pct"] = round(sum(excess) / len(excess), 4)
+    if sharpes:
+        agg["mean_sharpe"] = round(sum(sharpes) / len(sharpes), 4)
+    if dds:
+        agg["mean_max_drawdown_pct"] = round(sum(dds) / len(dds), 4)
+    if pfs:
+        agg["mean_profit_factor"] = round(sum(pfs) / len(pfs), 4)
     return agg
 
 
@@ -407,6 +589,8 @@ def run_suite(
     forward_validate: bool = False,
     forward_oos_bars: int = 30,
     deploy_config: dict[str, Any] | None = None,
+    csv_only: bool = True,
+    cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     eval_tag = f"eval_{int(time.time())}"
     out_dir = runs_dir / "evaluations" / eval_tag
@@ -434,10 +618,12 @@ def run_suite(
                 forward_validate=forward_validate,
                 forward_oos_bars=forward_oos_bars,
                 deploy_config=deploy_config,
+                csv_only=csv_only,
+                cache_dir=cache_dir,
             )
         )
         print(
-            f"  [{spec.id}] {len(rows[-1].get('bars', []))} bars, "
+            f"  [{spec.id}] {rows[-1].get('bars_used', 0)} bars, "
             f"{rows[-1].get('execution', {}).get('fills', 0)} trades, "
             f"return {rows[-1].get('total_return_pct', 'n/a')}%",
             file=sys.stderr,
@@ -447,8 +633,7 @@ def run_suite(
     report = {
         "eval_id": eval_tag,
         "methodology": (
-            "Anchored UTC calendar windows; OHLCV fetched by time range (reproducible for a given "
-            "exchange snapshot). Reports realized fills (buy/sell) and summary metrics per window. "
+            "Anchored UTC calendar windows; OHLCV from pinned local CSV when available (csv_only paper mode); otherwise CCXT range fetch. Reports realized fills (buy/sell) and summary metrics per window. "
             "Each window reports strategy return vs buy-and-hold on the same bars "
             "(asset % and fee-realistic round-trip equity). Beating that baseline is the honest "
             "active-management bar; positive mean return alone is not."
@@ -476,10 +661,17 @@ def report_to_markdown(report: dict[str, Any]) -> str:
         f"- **Ticker:** {report.get('ticker')}",
         f"- **Exchange:** {report.get('exchange')}",
         f"- **LLM:** {report.get('llm')}",
-        "",
-        "## Quality assessment",
-        "",
     ]
+    setup = (report.get("resolved_config") or {}).get("deploy_description")
+    if setup:
+        lines.append(f"- **Setup:** {setup}")
+    lines.extend(
+        [
+            "",
+            "## Quality assessment",
+            "",
+        ]
+    )
     a = report.get("aggregate") or {}
     qual = a.get("quality") or {}
     lines.append(f"- **All windows passed:** {'✅' if qual.get('all_windows_passed') else '❌'}")
@@ -529,7 +721,7 @@ def report_to_markdown(report: dict[str, Any]) -> str:
                 sells=ex.get("sell_fills", 0),
                 rt="yes" if ex.get("round_trip_evidence") else "no",
                 sharpe=float(m.get("sharpe") or 0),
-                mdd=float(m.get("max_drawdown") or 0),
+                mdd=float(m.get("max_drawdown_pct") or m.get("max_drawdown") or 0),
                 q=q_ok,
                 fwd=fwd_ok,
             )
@@ -593,6 +785,7 @@ def report_to_markdown(report: dict[str, Any]) -> str:
 
 __all__ = [
     "DEFAULT_DAILY_WINDOWS",
+    "RELEASE_DAILY_WINDOWS",
     "LLM_MONTHLY_WINDOWS",
     "HistoryWindowSpec",
     "build_aggregate",

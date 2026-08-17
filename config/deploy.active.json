@@ -1,10 +1,21 @@
 {
+  "description": "Rank 1 earner. News CoT + stat 0.10 (g49). Scored book: mean +8.15% / Sharpe 1.71, 2/2 windows profitable.",
   "profile": {
-    "profile_id": "macro_tilt"
+    "profile_id": "g49_tilt"
   },
   "agents": {
     "technical_ta_engine": {
-      "weight": 0.55,
+      "weight": 0.35,
+      "llm_enabled": true,
+      "enabled": true
+    },
+    "monetary_sentinel": {
+      "weight": 0.2,
+      "llm_enabled": false,
+      "enabled": true
+    },
+    "news_narrative_miner": {
+      "weight": 0.2,
       "llm_enabled": true,
       "enabled": true
     },
@@ -13,10 +24,10 @@
       "llm_enabled": false,
       "enabled": true
     },
-    "monetary_sentinel": {
-      "weight": 0.25,
+    "statistical_alpha_engine": {
       "llm_enabled": false,
-      "enabled": true
+      "enabled": true,
+      "weight": 0.1
     }
   },
   "decision_threshold": {

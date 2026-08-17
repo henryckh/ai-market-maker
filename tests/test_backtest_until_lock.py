@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backtest.bootstrap_showcase import _extra_bars_after_until
-from backtest.run_demo import _trailing_bars_locked, _until_end_ms
+from backtest.session import _trailing_bars_locked, _until_end_ms
 
 
 def _daily_bars(start: datetime, n: int) -> list[list[float]]:

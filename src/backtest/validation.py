@@ -427,8 +427,13 @@ def generate_quality_report(
     profit_factor: float | None,
     trades: list[dict[str, Any]] | None = None,
     forward_result: ForwardValidationResult | None = None,
+    require_min_trades: bool = True,
 ) -> BacktestQualityReport:
-    """Run quality checks and return a report."""
+    """Run quality checks and return a report.
+
+    ``require_min_trades`` is True for a single ``run``. Calendar ``windows``
+    members pass on bars (>=90) and roll trades up at suite level (>=15).
+    """
     regime_result = regime_coverage_check(_segment_regimes(close_prices))
     ss = validate_sample_size(total_bars, trade_count)
     pl = check_profit_loss_ratio(profit_factor)
@@ -445,7 +450,8 @@ def generate_quality_report(
     if not regime_result.get("passed", True):
         warnings.append(str(regime_result.get("warning", "")))
 
-    checks = [ss.passed, pl.passed]
+    sample_pass = ss.passed if require_min_trades else ss.min_bars_ok
+    checks = [sample_pass, pl.passed]
     if exit_check is not None:
         checks.append(exit_check.passed)
     if fwd is not None:

@@ -38,21 +38,20 @@ class StrategyPreset:
 PRESETS: dict[str, StrategyPreset] = {
     "macro_tilt": StrategyPreset(
         id="macro_tilt",
-        title="Macro tilt (weighted desk)",
+        title="Top earner (g49 news CoT)",
         category="weighted",
         coin="layers",
         deploy_path="config/deploy.active.json",
         reasoning_preview=(
-            "1. Tier-0 desks emit directional scores (TA 2.3, pattern 2.1, macro 1.1). "
-            "2. Weight assigner tilts toward macro/TA (2.3:0.55, 2.1:0.15, 1.1:0.25). "
-            "3. Per-agent LLM (agent_llm) refines intent under each desk. "
+            "1. Tier-0 desks emit directional scores (TA, news, macro, pattern, funding). "
+            "2. Weights: TA 0.35 CoT, news 0.20 CoT, macro 0.20, pattern 0.15, stat 0.10. "
+            "3. Per-agent LLM refines intent on TA + news desks. "
             "4. Weighted arbitrator fuses composites + TA-led gates. "
             "5. Portfolio + risk guard size and veto. "
-            "6. Best on 1d multi-symbol BTC/ETH/SOL windows."
+            "6. Leverage 2.0. Rank-1 earner on the scored book (+8.15% / 1.71)."
         ),
         description=(
-            "Production weighted arbitrator profile (macro_tilt). Agent LLM desks "
-            "with TA-led alignment gating — the default Research strategy."
+            "Shipped default (g49). Highest mean on the scored catalog: +8.15% / Sharpe 1.71."
         ),
         n_bars=220,
         interval_sec=86_400,
@@ -60,30 +59,6 @@ PRESETS: dict[str, StrategyPreset] = {
         lookback_days=60,
         symbols="BTC/USDT,ETH/USDT,SOL/USDT",
         seed=1,
-    ),
-    "conservative_gate": StrategyPreset(
-        id="conservative_gate",
-        title="Conservative gate",
-        category="weighted",
-        coin="shield",
-        deploy_path="config/deploy.conservative_gate.json",
-        reasoning_preview=(
-            "1. Same multi-agent graph as macro tilt. "
-            "2. Heavier TA weight (2.3:0.60) and stricter decision thresholds. "
-            "3. Lower leverage (1.5) and tighter TA-led buy/sell gates. "
-            "4. Prefer fewer, higher-conviction fills. "
-            "5. Still agent_llm + weighted fusion — not a classic indicator pack."
-        ),
-        description=(
-            "Stricter weighted desk: conservative_gate deploy profile with lower "
-            "leverage and tighter TA-led gates for quieter markets."
-        ),
-        n_bars=220,
-        interval_sec=86_400,
-        max_steps=180,
-        lookback_days=60,
-        symbols="BTC/USDT,ETH/USDT,SOL/USDT",
-        seed=2,
     ),
     "ohlcv_only": StrategyPreset(
         id="ohlcv_only",
@@ -93,13 +68,13 @@ PRESETS: dict[str, StrategyPreset] = {
         deploy_path="config/deploy.ohlcv_only.json",
         reasoning_preview=(
             "1. Emphasize OHLCV/TA desk (2.3:0.75) with pattern assist (2.1:0.25). "
-            "2. Weighted arbitrator still fuses scores under agent_llm. "
-            "3. Useful when macro inputs are noisy or unavailable. "
+            "2. No desk CoT and no arbitrator LLM — numeric fusion only. "
+            "3. Useful when macro inputs are noisy or you need an offline smoke. "
             "4. Same execution stack — only the desk weight profile changes."
         ),
         description=(
-            "Weighted profile that leans on price/TA desks (ohlcv_only) while "
-            "keeping the agent_llm arbitrator path."
+            "No-LLM smoke: TA + pattern only (ohlcv_only). Use to check CSV wiring, "
+            "not as a return preset."
         ),
         n_bars=200,
         interval_sec=86_400,
@@ -116,7 +91,8 @@ def get_preset(preset_id: str) -> StrategyPreset:
     # Legacy Research card ids → current weighted default.
     legacy = {
         "momentum": "macro_tilt",
-        "mean_reversion": "conservative_gate",
+        "mean_reversion": "macro_tilt",
+        "conservative_gate": "macro_tilt",
         "all_weather": "macro_tilt",
     }
     key = legacy.get(key, key)

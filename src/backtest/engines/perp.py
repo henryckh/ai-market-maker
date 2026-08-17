@@ -169,10 +169,17 @@ class PerpEngine:
                 return rate
         return _TIER_TABLE[-1][1]
 
-    def on_bar(self, symbol: str, close: float, timestamp_ms: int) -> None:
+    def on_bar(
+        self,
+        symbol: str,
+        high: float,
+        low: float,
+        close: float,
+        timestamp_ms: int,
+    ) -> None:
         self._apply_funding(symbol, close, timestamp_ms)
         self._check_liquidation(symbol, close, timestamp_ms)
-        self._check_tp_sl(symbol, close, timestamp_ms)
+        self._check_tp_sl(symbol, high, low, close, timestamp_ms)
         self._check_timeout(symbol, close, timestamp_ms)
 
     def _apply_funding(self, symbol: str, close: float, ts_ms: int) -> None:
@@ -236,30 +243,61 @@ class PerpEngine:
                 exit_ts_ms=int(timestamp_ms),
             )
 
-    def _check_tp_sl(self, symbol: str, close: float, timestamp_ms: int) -> None:
-        """Close positions that hit take-profit or stop-loss levels."""
+    def _check_tp_sl(
+        self,
+        symbol: str,
+        high: float,
+        low: float,
+        _close: float,
+        timestamp_ms: int,
+    ) -> None:
+        """TP/SL from bar high/low, fill at the trigger — never on the entry bar.
+
+        Entry is at this bar's open. Using the same bar's close (or a 15% dump)
+        as a "take-profit" is an intraday fantasy on daily candles. We mark the
+        entry bar at close and only allow stops after the position has lived
+        one bar. If both stop and target trade in the same later bar, the stop
+        wins (pessimistic path).
+        """
         pos = self.positions.get(symbol)
         if pos is None:
             return
         if self.take_profit_pct <= 0 and self.stop_loss_pct <= 0:
             return
+        if (self._bar_index - pos.entry_bar_index) < 1:
+            return
 
-        unrealized_pnl_pct = pos.direction * (close - pos.entry_price) / pos.entry_price * 100.0
+        entry = float(pos.entry_price)
+        if entry <= 1e-12:
+            return
+        tp_pct = float(self.take_profit_pct)
+        sl_pct = float(self.stop_loss_pct)
+        if pos.direction > 0:
+            tp_px = entry * (1.0 + tp_pct / 100.0) if tp_pct > 0 else None
+            sl_px = entry * (1.0 - sl_pct / 100.0) if sl_pct > 0 else None
+            hit_sl = sl_px is not None and float(low) <= sl_px
+            hit_tp = tp_px is not None and float(high) >= tp_px
+        else:
+            tp_px = entry * (1.0 - tp_pct / 100.0) if tp_pct > 0 else None
+            sl_px = entry * (1.0 + sl_pct / 100.0) if sl_pct > 0 else None
+            hit_sl = sl_px is not None and float(high) >= sl_px
+            hit_tp = tp_px is not None and float(low) <= tp_px
 
-        if self.take_profit_pct > 0 and unrealized_pnl_pct >= self.take_profit_pct:
+        if hit_sl and hit_tp:
+            hit_tp = False
+        if hit_sl and sl_px is not None:
             self._close(
                 symbol,
-                self.apply_slippage(close, -pos.direction),
-                "take_profit",
+                self.apply_slippage(sl_px, -pos.direction),
+                "stop_loss",
                 exit_ts_ms=int(timestamp_ms),
             )
             return
-
-        if self.stop_loss_pct > 0 and unrealized_pnl_pct <= -self.stop_loss_pct:
+        if hit_tp and tp_px is not None:
             self._close(
                 symbol,
-                self.apply_slippage(close, -pos.direction),
-                "stop_loss",
+                self.apply_slippage(tp_px, -pos.direction),
+                "take_profit",
                 exit_ts_ms=int(timestamp_ms),
             )
 
@@ -295,6 +333,8 @@ class PerpEngine:
             # Completed bars only (no look-ahead). Signal at end of bar i-1 → fill at open of bar i.
             completed = {s: aligned[s][:bar_idx] for s in symbols}
             bar_open = {s: float(aligned[s][bar_idx][1]) for s in symbols}
+            bar_high = {s: float(aligned[s][bar_idx][2]) for s in symbols}
+            bar_low = {s: float(aligned[s][bar_idx][3]) for s in symbols}
             last_close = {s: float(aligned[s][bar_idx][4]) for s in symbols}
             last_ts = int(aligned[symbols[0]][bar_idx][0])
             self._last_bar_ts = last_ts
@@ -324,7 +364,13 @@ class PerpEngine:
                     )
 
             for sym in symbols:
-                self.on_bar(sym, last_close[sym], last_ts)
+                self.on_bar(
+                    sym,
+                    bar_high[sym],
+                    bar_low[sym],
+                    last_close[sym],
+                    last_ts,
+                )
 
             eq = self._equity(last_close)
             snap = EquitySnapshot(

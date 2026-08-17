@@ -1,0 +1,12 @@
+{
+  "core": [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"
+  ],
+  "portfolio": [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
+    "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "LTCUSDT", "ATOMUSDT",
+    "NEARUSDT", "UNIUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "SUIUSDT",
+    "FILUSDT"
+  ],
+  "archive_extra_note": "Use --tier top100 with volume rank at download time; portfolio is the fixed offline default for paper multi-asset runs."
+}

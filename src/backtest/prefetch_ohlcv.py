@@ -17,7 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from backtest.ohlcv_csv_cache import ensure_bars_cached, ohlcv_cache_path
-from backtest.run_demo import build_run_demo_parser, resolve_run_demo_symbols
+from backtest.session import build_run_parser, resolve_session_symbols
 from config.app_settings import load_app_settings
 
 
@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dynamic",
         action="store_true",
-        help="Resolve universe like run_demo (config/app.default.json market.universe_symbols).",
+        help="Resolve universe like session (config/app.default.json market.universe_symbols).",
     )
     p.add_argument("--ticker", default=load_app_settings().market.default_ticker)
     p.add_argument("--timeframe", default="1d")
@@ -55,11 +55,11 @@ def main(argv: list[str] | None = None) -> int:
         sym_list = [s.strip() for s in args.symbols.split(",") if s.strip()]
         primary = str(args.ticker) if str(args.ticker) in sym_list else sym_list[0]
     elif args.dynamic:
-        demo_parser = build_run_demo_parser()
+        demo_parser = build_run_parser()
         demo_args = demo_parser.parse_args(
             ["--ticker", str(args.ticker), "--exchange", str(args.exchange), "--steps", "2"]
         )
-        sym_list, primary = resolve_run_demo_symbols(demo_args, demo_parser)
+        sym_list, primary = resolve_session_symbols(demo_args, demo_parser)
         if len(sym_list) < 2:
             print("[prefetch] dynamic universe returned <2 symbols; use --symbols", file=sys.stderr)
             return 1

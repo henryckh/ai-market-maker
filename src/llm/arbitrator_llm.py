@@ -4,7 +4,7 @@ import json
 import os
 from typing import Any, Dict
 
-from config.agent_prompts import prompt_settings_by_actor
+from config.agent_prompts import AgentPromptSettings, prompt_settings_by_actor
 from llm.json_parse import parse_json_object
 from llm.openai_client import run_tool_calling_chat
 from llm.structured_output import (
@@ -28,6 +28,18 @@ from workflow.tier2_context import (
     compute_legacy_arbitrator_scores,
     legacy_deterministic_stance_preview,
 )
+
+
+def merge_operator_arbitrator_prompt(engineered: str, ps: AgentPromptSettings | None) -> str:
+    """Keep engineered arbitrator rules; append operator JSON as overlay."""
+    system = engineered
+    if ps is None:
+        return system
+    if ps.system_prompt.strip():
+        system = system.rstrip() + "\n\nOperator policy:\n" + ps.system_prompt.strip()
+    if ps.task_prompt.strip():
+        system = system.rstrip() + "\n\nOperator task prompt:\n" + ps.task_prompt.strip()
+    return system
 
 
 def _reasoning_entry(
@@ -259,13 +271,9 @@ def signal_arbitrator_llm(state: HedgeFundState) -> Dict[str, Any]:
         "Output MUST be valid JSON with keys: stance, confidence, reasons (array of strings).\n"
         "Stance must be one of: bullish, bearish, neutral."
     )
-    # Operator-configurable (file-based) overrides.
+    # Operator JSON is a policy overlay. Do not wipe the engineered rules above.
     ps = prompt_settings_by_actor().get("signal_arbitrator")
-    if ps is not None:
-        if ps.system_prompt.strip():
-            system = ps.system_prompt.strip()
-        if ps.task_prompt.strip():
-            system = system.rstrip() + "\n\nOperator task prompt:\n" + ps.task_prompt.strip()
+    system = merge_operator_arbitrator_prompt(system, ps)
     uni = state.get("universe")
     universe_out = [str(x) for x in uni] if isinstance(uni, list) and uni else [ticker]
     user = json.dumps(
@@ -459,4 +467,8 @@ def signal_arbitrator_llm(state: HedgeFundState) -> Dict[str, Any]:
     }
 
 
-__all__ = ["sanitize_llm_arbitrator_output", "signal_arbitrator_llm"]
+__all__ = [
+    "merge_operator_arbitrator_prompt",
+    "sanitize_llm_arbitrator_output",
+    "signal_arbitrator_llm",
+]

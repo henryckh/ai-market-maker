@@ -10,14 +10,14 @@ Tier-0 perception agent that computes macro liquidity regime and systemic beta s
 - **Enabled by default**: Yes (weight: 0.05)
 
 ## Goals
-- Determine the liquidity regime (risk_on / neutral / risk_off) from market data and optional Nexus context
+- Determine the liquidity regime (risk_on / neutral / risk_off) from FRED (VIX, fed funds, DXY), DefiLlama lag-1 stablecoin/TVL, Fear & Greed, and OHLCV fallbacks
 - Compute a systemic beta score [0–100] indicating macro tail risk
 - Provide the weighted arbitrator with macro regime context for all downstream factors
 
 ## SOP
 1. **Input**: `ticker`, `universe`, `market_data`, optional `nexus_context` from shared memory
 2. **Process**:
-   - `MonetarySentinelAgent.analyze()` evaluates OHLCV liquidity proxies (volume depth, spread stability) and Nexus macro endpoints
+   - `MonetarySentinelAgent.analyze()` blends FRED (VIX / DXY / fed funds), DefiLlama 7d liquidity, Fear & Greed, and OHLCV return/vol
    - Returns `liquidity_regime` (str) and `systemic_beta_score` (float, 0–100)
 3. **Output**:
    - `monetary_sentinel["primary"]` — analysis dict for primary ticker

@@ -9,11 +9,14 @@ Secrets stay in `.env` (API keys, exchange credentials, DB).
 
 ```json
 {
-  "profile": { "profile_id": "macro_tilt" },
+  "description": "Human note. Ignored by trading logic; copied into backtest reports.",
+  "profile": { "profile_id": "g49_tilt" },
   "agents": {
-    "technical_ta_engine": { "weight": 0.55, "llm_enabled": true, "enabled": true },
+    "technical_ta_engine": { "weight": 0.35, "llm_enabled": true, "enabled": true },
+    "monetary_sentinel": { "weight": 0.20, "llm_enabled": false, "enabled": true },
+    "news_narrative_miner": { "weight": 0.20, "llm_enabled": true, "enabled": true },
     "pattern_recognition_bot": { "weight": 0.15, "llm_enabled": false, "enabled": true },
-    "monetary_sentinel": { "weight": 0.25, "llm_enabled": false, "enabled": true }
+    "statistical_alpha_engine": { "weight": 0.10, "llm_enabled": false, "enabled": true }
   },
   "execution": {
     "use_llm_synthesis": true,
@@ -51,11 +54,13 @@ Desk CoT and the final arbitrator overlay are independent. Weighted math always 
 
 `use_llm_synthesis` does not turn on the arbitrator overlay. `arbitrator_llm` does not turn on desk CoT. Both need an API key (`OPENAI_API_KEY` or `ATLASCLOUD_API_KEY`).
 
-| Preset | Desks | Arbitrator LLM |
-|--------|-------|----------------|
-| `deploy.active.json` | TA desk `llm_enabled: true` + `use_llm_synthesis: true` | on |
-| `deploy.golden.json` / `deploy.hybrid.json` | numeric desks (`llm_enabled: false`, `use_llm_synthesis: false`) | on |
-| `deploy.ohlcv_only.json` / `deploy.conservative_gate.json` | numeric desks | off |
+| Preset | Role |
+|--------|------|
+| `deploy.active.json` | Rank 1 earner (g49): +8.15% / 1.71 |
+| `deploy.easy_short.json` … `deploy.sharpe_focus.json` | Ranks 2–10 unique earners |
+| `deploy.ohlcv_only.json` | No-LLM CI smoke |
+
+See [`docs/paper-eval.md`](paper-eval.md) for the ranked table.
 
 Weights are one-time config in `agents.*.weight` (Config Designer / deploy JSON). They are not retuned each bar.
 

@@ -27,6 +27,7 @@ from agents.risk_management import RiskManagementAgent
 from agents.statistical_alpha_engine import StatisticalAlphaEngineAgent
 from agents.technical_ta_engine import TechnicalTaEngineAgent
 from agents.whale_behavior_analyst import WhaleBehaviorAnalystAgent
+from config.agent_run_mode import is_agent_llm_mode
 from config.app_settings import apply_strategy_env_defaults_from_settings, load_app_settings
 from config.fund_policy import load_fund_policy
 from config.llm_env import require_llm_key
@@ -38,8 +39,6 @@ from market.universe import augment_universe_with_oi, select_universe_from_ticke
 from nexus_data.client import NexusDataClient
 from nexus_data.feeds import (
     fetch_nexus_global_bundle,
-    fetch_nexus_per_symbol,
-    merge_bundle_with_per_symbol,
     nexus_feeds_enabled,
     oi_ccxt_candidates,
 )
@@ -261,7 +260,7 @@ def market_scan(state: HedgeFundState) -> dict[str, Any]:
     sm_out = dict(state.get("shared_memory") or {})
 
     if run_mode == RunMode.BACKTEST.value:
-        # Backtest mode must be deterministic and offline-friendly.
+        # Backtest: deterministic offline path. Nexus via HistoricalNexusProvider only.
         meme_coins: list[dict[str, Any]] = []
         if ticker not in data:
             data[ticker] = {"status": "backtest", "note": "no market_data provided"}
@@ -272,7 +271,42 @@ def market_scan(state: HedgeFundState) -> dict[str, Any]:
             [a, b]
             for a, b in select_universe_from_tickers(None, primary=ticker, size=len(universe)).pairs
         ]
-        scan_decision: dict[str, Any] = {"symbols": len(data), "meme_candidates": len(meme_coins)}
+        as_of_ms = None
+        bt = sm_out.get("backtest")
+        if isinstance(bt, dict) and bt.get("window_last_ts_ms") is not None:
+            try:
+                as_of_ms = int(float(bt["window_last_ts_ms"]))
+            except (TypeError, ValueError):
+                as_of_ms = None
+        existing_nexus = sm_out.get("nexus")
+        seeded = isinstance(existing_nexus, dict) and bool(existing_nexus.get("endpoints"))
+        try:
+            if seeded:
+                nexus_attached = True
+                nexus_source = str(existing_nexus.get("source") or "seeded")
+            else:
+                from nexus_data.provider import resolve_nexus_provider
+
+                hist = resolve_nexus_provider(run_mode=run_mode)
+                sm_out["nexus"] = hist.get_bundle(
+                    as_of_ms=as_of_ms,
+                    universe=universe,
+                    market_data=data,
+                    primary=ticker,
+                )
+                nexus_attached = True
+                nexus_source = "historical"
+        except Exception as e:
+            logger.warning("Historical Nexus provider failed: %s", e)
+            nexus_attached = False
+            nexus_source = "historical"
+        scan_decision: dict[str, Any] = {
+            "symbols": len(data),
+            "meme_candidates": len(meme_coins),
+            "universe_source": "backtest_provided",
+            "nexus_attached": nexus_attached,
+            "nexus_source": nexus_source,
+        }
     else:
         agent = MarketScanAgent(testnet=True)
         markets_keys = set(agent.exchange.markets.keys())
@@ -354,29 +388,37 @@ def market_scan(state: HedgeFundState) -> dict[str, Any]:
                 except Exception as e:
                     blob["nexus_depth"] = {"status": "error", "error": str(e)}
 
-        if nexus_feeds_enabled():
-            if nxc is not None:
-                try:
-                    per = fetch_nexus_per_symbol(nxc, universe)
-                    nexus_bundle = merge_bundle_with_per_symbol(gb, per)
-                except Exception as e:
-                    logger.warning("Nexus per-symbol feeds failed: %s", e)
-                    merged_errs = list(gb.get("errors") or []) + [str(e)]
-                    nexus_bundle = {**gb, "errors": merged_errs}
-            else:
-                nexus_bundle = gb if gb else None
+        # Live Nexus via provider (same contract as historical).
+        try:
+            from nexus_data.provider import resolve_nexus_provider
 
-        if nexus_bundle is not None:
+            live = resolve_nexus_provider(run_mode=run_mode)
+            nexus_bundle = live.get_bundle(
+                universe=universe,
+                market_data=data,
+                primary=ticker,
+            )
+            # Prefer richer global+per merge when feeds already partially loaded
+            if gb and (gb.get("endpoints") or {}) and not (nexus_bundle.get("endpoints") or {}):
+                nexus_bundle = gb
             sm_out["nexus"] = nexus_bundle
             ne = len(nexus_bundle.get("errors") or [])
             if ne:
                 logger.info("Nexus bundle attached with %d partial endpoint errors", ne)
+        except Exception as e:
+            logger.warning("Live Nexus provider failed: %s", e)
+            if gb:
+                sm_out["nexus"] = gb
+                nexus_bundle = gb
+            else:
+                nexus_bundle = None
 
         scan_decision = {
             "symbols": len(data),
             "meme_candidates": len(meme_coins),
             "universe_source": universe_source,
             "nexus_attached": nexus_bundle is not None,
+            "nexus_source": "live",
         }
 
     return {
@@ -814,16 +856,55 @@ def merged_quant_analysis_for_universe(state: HedgeFundState) -> dict[str, Any]:
     return {"status": "success", "analysis": merged}
 
 
+def _intent_action(state: HedgeFundState) -> str:
+    intent = state.get("trade_intent") if isinstance(state.get("trade_intent"), dict) else {}
+    action = str(intent.get("action") or "HOLD").strip().lower()
+    return action if action in ("buy", "sell", "hold") else "hold"
+
+
+def _deterministic_portfolio_proposal(state: HedgeFundState) -> dict[str, Any]:
+    """Map arbitrator trade_intent to a proposal without an LLM call."""
+    tk = str(state.get("ticker") or "BTC/USDT")
+    uni = state.get("universe")
+    universe = [str(x) for x in uni] if isinstance(uni, list) and uni else [tk]
+    action = _intent_action(state)
+    return {
+        "status": "success",
+        "source": "deterministic_from_intent",
+        "trades": {sym: {"action": action if sym == tk else "hold"} for sym in universe},
+    }
+
+
+def _deterministic_portfolio_execute(state: HedgeFundState) -> dict[str, Any]:
+    """Engine fills from trade_intent; keep a matching no-LLM execution record."""
+    tk = str(state.get("ticker") or "BTC/USDT")
+    action = _intent_action(state)
+    orders: list[dict[str, Any]] = []
+    if action in ("buy", "sell"):
+        orders.append({"symbol": tk, "side": action, "qty": 0.01})
+    return {
+        "status": "success",
+        "source": "deterministic_from_intent",
+        "smart_orders": orders,
+    }
+
+
 def portfolio_proposal(state: HedgeFundState) -> dict[str, Any]:
     logger.debug("Running portfolio_proposal node with state: %s", state)
-    proposal = llm_portfolio_proposal(state)
-    if not isinstance(proposal, dict) or proposal.get("status") == "error":
-        logger.error("LLM portfolio_proposal failed (no non-LLM fallback).")
-        proposal = {
-            "status": "error",
-            "error": "llm_portfolio_proposal_failed",
-            "detail": proposal if isinstance(proposal, dict) else str(proposal),
-        }
+    use_llm = (
+        is_agent_llm_mode() and str(state.get("run_mode") or "").lower() != RunMode.BACKTEST.value
+    )
+    if use_llm:
+        proposal = llm_portfolio_proposal(state)
+        if not isinstance(proposal, dict) or proposal.get("status") == "error":
+            logger.error("LLM portfolio_proposal failed (no non-LLM fallback).")
+            proposal = {
+                "status": "error",
+                "error": "llm_portfolio_proposal_failed",
+                "detail": proposal if isinstance(proposal, dict) else str(proposal),
+            }
+    else:
+        proposal = _deterministic_portfolio_proposal(state)
     prop = proposal if isinstance(proposal, dict) else {}
     signal_context = state.get("proposed_signal") or {}
     if isinstance(prop, dict):
@@ -960,15 +1041,21 @@ def portfolio_execute(state: HedgeFundState) -> dict[str, Any]:
 
     # For safety + tool-calling parity, treat this node as "execution intent" and place via adapter.
     tk = state.get("ticker", "BTC/USDT")
-    portfolio_result = state.get("proposal")
-    if not isinstance(portfolio_result, dict):
-        portfolio_result = llm_portfolio_proposal(state)
-    exec_blk = llm_portfolio_execute(
-        state, portfolio_result=portfolio_result if isinstance(portfolio_result, dict) else {}
+    portfolio_result = state.get("proposal") if isinstance(state.get("proposal"), dict) else {}
+    use_llm = (
+        is_agent_llm_mode() and str(state.get("run_mode") or "").lower() != RunMode.BACKTEST.value
     )
-    if not isinstance(exec_blk, dict) or exec_blk.get("status") in ("error",):
-        logger.error("LLM portfolio_execute failed (no non-LLM fallback).")
-        exec_blk = None
+    if use_llm:
+        if not portfolio_result:
+            portfolio_result = llm_portfolio_proposal(state)
+        exec_blk = llm_portfolio_execute(
+            state, portfolio_result=portfolio_result if isinstance(portfolio_result, dict) else {}
+        )
+        if not isinstance(exec_blk, dict) or exec_blk.get("status") in ("error",):
+            logger.error("LLM portfolio_execute failed (no non-LLM fallback).")
+            exec_blk = None
+    else:
+        exec_blk = _deterministic_portfolio_execute(state)
 
     # P3: emit a safe "smart order" record via NexusAdapter (mock by default).
     # This does not place a real order yet; it provides tool-calling parity for the UI.
@@ -1147,7 +1234,7 @@ def portfolio_execute(state: HedgeFundState) -> dict[str, Any]:
                     )
                 )
 
-    if not smart_orders and str(state.get("run_mode") or "").lower() == "paper":
+    if not smart_orders and str(state.get("run_mode") or "").lower() in ("paper", "backtest"):
         intent = state.get("trade_intent") if isinstance(state.get("trade_intent"), dict) else {}
         action = str(intent.get("action") or "").upper()
         sym = str(intent.get("ticker") or tk)

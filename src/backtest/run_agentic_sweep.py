@@ -1,15 +1,20 @@
 """Agentic parameter sweep across regimes, symbol sets, and arbitrator/TA presets.
 
-Deterministic weighted arbitrator only (no LLM). Writes::
+Leftover **weight / threshold grid**. It does **not** search LLM prompts or
+deploy JSON. Deterministic weighted math (even though it passes
+``deploy_arbitrator_mode="agent_llm"``); LLM desks only fire if a key is
+present and ``agents.*.llm_enabled`` is on in the loaded deploy file.
 
-    .runs/evaluations/sweep_<id>/sweep_report.json
-    .runs/evaluations/sweep_<id>/sweep_report.md
+The supported ablation path is one CLI + ``--deploy``::
 
-Example::
+    python -m backtest windows --deploy config/deploy.active.json
+    python -m backtest windows --deploy config/deploy.ohlcv_only.json
 
-    NEXUS_DISABLE=1 uv run python -m backtest.run_agentic_sweep
+Do not add presets here. Put the combo in ``config/deploy.*.json``.
 
-    uv run python -m backtest.run_agentic_sweep --quick
+Example (legacy)::
+
+    NEXUS_DISABLE=1 uv run python -m backtest.run_agentic_sweep --quick
 """
 
 from __future__ import annotations
@@ -538,7 +543,7 @@ def _report_md(report: dict[str, Any]) -> str:
                     "### Suggested README showcase command",
                     "",
                     "```bash",
-                    "NEXUS_DISABLE=1 uv run python -m backtest.run_demo --online \\",
+                    "NEXUS_DISABLE=1 uv run python -m backtest run --online \\",
                     f"  --timeframe 1d --steps {showcase.get('bars', 365)} \\",
                     "  --symbols BTC/USDT,ETH/USDT,SOL/USDT --ticker BTC/USDT",
                     "```",

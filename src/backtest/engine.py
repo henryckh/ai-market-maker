@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 from typing import Any as _Any
 
 from backtest.data_quality import validate_ohlcv_window
+from backtest.receipts import build_tier0_summary, cot_snippets, nexus_asof_receipt
 from config.app_settings import load_app_settings
 from config.run_mode import RunMode
 from flow_log import FlowEventRepo, set_flow_repo
@@ -225,103 +226,6 @@ class BacktestEngine:
         _invoke_cache: dict[Any, dict[str, Any]] = {}
         _equity_peak: dict[str, float] = {"v": 0.0}
 
-        def _compact_agent_contract(c: dict[str, Any]) -> dict[str, Any]:
-            aid = str(c.get("agent_id", c.get("agent", "?")))
-            skip = {
-                "agent",
-                "agent_id",
-                "label",
-                "source",
-                "llm_enabled",
-                "llm_error",
-                "cached",
-                "reasoning",
-                "composite",
-                "confidence",
-            }
-            signal: dict[str, Any] = {}
-            for k, v in c.items():
-                if k in skip or v is None:
-                    continue
-                if isinstance(v, dict):
-                    signal[k] = v
-                else:
-                    signal[k] = v
-            entry: dict[str, Any] = {
-                "agent_id": aid,
-                "source": c.get("source"),
-                "composite": c.get("composite"),
-                "confidence": c.get("confidence"),
-            }
-            if signal:
-                entry["signal"] = signal
-            reasoning = c.get("reasoning")
-            if isinstance(reasoning, str) and reasoning.strip():
-                entry["reasoning"] = reasoning[:200]
-            return entry
-
-        def _arbitration_scores_by_agent(wf_output: dict[str, Any]) -> dict[str, dict[str, Any]]:
-            scores: dict[str, dict[str, Any]] = {}
-            logs = wf_output.get("reasoning_logs")
-            if not isinstance(logs, list):
-                return scores
-            for row in logs:
-                if not isinstance(row, dict):
-                    continue
-                extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
-                aid = extra.get("agent_id")
-                if not aid:
-                    continue
-                dec = row.get("decision") if isinstance(row.get("decision"), dict) else {}
-                scores[str(aid)] = {
-                    "composite": dec.get("composite"),
-                    "confidence": dec.get("confidence"),
-                    "stance": dec.get("stance"),
-                }
-            return scores
-
-        def _build_tier0_summary(rec: dict[str, Any], wf_output: dict[str, Any]) -> None:
-            from schemas.tier0_contract import tier0_contracts_by_agent
-
-            arb_scores = _arbitration_scores_by_agent(wf_output)
-            contracts = wf_output.get("tier0_contracts")
-            if isinstance(contracts, list) and contracts:
-                idx = tier0_contracts_by_agent(wf_output)
-                tier0 = [_compact_agent_contract(c) for c in idx.values()]
-                for entry in tier0:
-                    scores = arb_scores.get(str(entry.get("agent_id", "")))
-                    if not scores:
-                        continue
-                    for key in ("composite", "confidence", "stance"):
-                        if entry.get(key) is None and scores.get(key) is not None:
-                            entry[key] = scores[key]
-                if tier0:
-                    rec["tier0_summary"] = tier0
-                    return
-
-            # Fallback: arbitration reasoning_logs (post-weight-assigner composites).
-            if arb_scores:
-                rec["tier0_summary"] = [
-                    {"agent_id": aid, "source": "arbitration", **scores}
-                    for aid, scores in arb_scores.items()
-                ]
-                return
-
-            signals = wf_output.get("proposed_signal", {}).get("params", {}).get("agent_signals")
-            if isinstance(signals, list):
-                tier0_fb = [
-                    {
-                        "agent_id": s.get("agent_id", "?"),
-                        "composite": s.get("composite"),
-                        "confidence": s.get("confidence"),
-                        "stance": s.get("stance"),
-                    }
-                    for s in signals
-                    if isinstance(s, dict)
-                ]
-                if tier0_fb:
-                    rec["tier0_summary"] = tier0_fb
-
         def _signal_fn(symbol: str, window: list, positions, account) -> float:
             from backtest.engines.perp import coerce_account
             from schemas.state import initial_hedge_fund_state
@@ -475,17 +379,8 @@ class BacktestEngine:
             }
             sm["memory"] = run_mem.to_shared_memory_fragment()
 
-            from backtest.ohlcv_derived_context import (
-                backtest_ohlcv_nexus_enabled,
-                build_ohlcv_derived_nexus_context,
-            )
-
-            if backtest_ohlcv_nexus_enabled():
-                sm["nexus"] = build_ohlcv_derived_nexus_context(
-                    ticker=str(symbol),
-                    universe=list(state.get("universe") or []),
-                    market_data=state.get("market_data") or {},
-                )
+            # Nexus context is attached by market_scan via HistoricalNexusProvider
+            # (as_of = window_last_ts_ms). Engine only stamps backtest clock metadata.
 
             last_ts = sm["backtest"].get("window_last_ts_ms")
             run_mem.record_view(
@@ -626,9 +521,18 @@ class BacktestEngine:
                         rec["data_quality"] = dq_store
                     if invoke_cache_hit:
                         rec["invoke_cache_shared"] = True
-                    if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") == "1":
-                        if isinstance(output, dict):
-                            _build_tier0_summary(rec, output)
+                    if isinstance(output, dict):
+                        tier0 = build_tier0_summary(output)
+                        if tier0:
+                            rec["tier0_summary"] = tier0
+                        cot = cot_snippets(output)
+                        if cot:
+                            rec["cot"] = cot
+                    asof = nexus_asof_receipt(output if isinstance(output, dict) else None)
+                    if not asof:
+                        asof = nexus_asof_receipt(state)
+                    if asof:
+                        rec["nexus_asof"] = asof
                     receipt_writer.append(rec)
                 except Exception:
                     pass

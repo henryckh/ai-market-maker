@@ -27,6 +27,7 @@ Designed to feel like a small professional trading firm — not just another bot
 - Multi-agent workflow with clear desk responsibilities
 - Strict **Risk Guard** that can veto any trade
 - Quant-style backtesting with built-in benchmarks; **agentic LLM required** (`OPENAI_API_KEY` or `ATLASCLOUD_API_KEY`)
+- **Pinned historical `data/`** — daily OHLCV, funding, FRED / DefiLlama / Fear & Greed, news dailies, sha256 manifest so `--csv-only` reruns match
 - Unified agent interface + governance layer
 - **OpenClaw-ready packaging** (`SKILL.md` + `manifest.json` + dedicated runners)
 - Paper trading on Binance Testnet + rich local backtester; Hyperliquid adapter (dry-run) via OMS layer
@@ -67,6 +68,7 @@ Deeper agentic capabilities, better OpenClaw integration, and support for additi
 
 - **Real risk governance** — Risk Guard has final veto power, not just logging.
 - **Quant discipline** — Every backtest includes clear benchmarks. No hand-waving.
+- **Reproducible tape** — Pinned `data/` (OHLCV, funding, macro, news) with `MANIFEST.json` hashes; bar-aligned, no live Nexus in backtest.
 - **Standardized agents** — All agents follow the same `Input → Process → Output → Feedback` contract.
 - **Transparency** — Full traces, reasoning logs, and event ledger.
 - **Extensibility** — Built with LangGraph, clean personas, and OpenClaw skill packaging.
@@ -228,6 +230,7 @@ pip install ta-lib
 ### Configuration Philosophy
 - **Strategy** → `config/deploy.active.json` (desks, weights, LLM overlays, gates). See [`docs/agentic-config.md`](docs/agentic-config.md)
 - **Policy & universe** → `config/policy.default.json` and `config/app.default.json`
+- **Historical tape** → `data/` + `data/MANIFEST.json` (not live APIs)
 - **Secrets / ops** → `.env` only (no arbitrator-mode or LLM-agent env flags)
 
 Detailed docs:
@@ -256,7 +259,7 @@ uv run pytest -q tests/test_agentic_trading_e2e.py tests/test_tier0_consensus.py
 - **Portfolio** — proposal / execute
 - **Risk Guard** — hard veto before execution
 
-Default research combo (`macro_tilt` in `config/deploy.active.json`): TA×0.55, macro×0.25, pattern×0.15. Personas in `docs/personas/`; interface in `src/agents/base_agent.py`.
+Default research combo (`g49` in `config/deploy.active.json`): TA×0.35 CoT, news×0.20 CoT, macro×0.20, pattern×0.15, stat×0.10. Personas in `docs/personas/`; interface in `src/agents/base_agent.py`.
 
 ---
 
@@ -271,26 +274,37 @@ Every backtest automatically includes:
 
 **Important**: A single profitable backtest is **not** proof of edge. Always validate across multiple regimes and out-of-sample periods.
 
+### Pinned historical data
+
+`data/` ships in the repo so a clone can run `--csv-only` without fetching APIs or leaking look-ahead (today’s news on 2022 bars). Hashes live in `data/MANIFEST.json`. Layers:
+
+| Layer | Path | Used for |
+|-------|------|----------|
+| Daily OHLCV (19 USDT pairs) | `data/ohlcv/` | TA / pattern desks, fills, buy-and-hold |
+| Perp funding | `data/derivatives/` | Statistical / funding context |
+| FRED (VIX, fed funds, 10y, DXY) | `data/macro/fred_daily.csv` | `monetary_sentinel` |
+| DefiLlama TVL / stables (lag-1) | `data/macro/defillama_liquidity_daily.csv` | `monetary_sentinel` |
+| Fear & Greed | `data/macro/fear_greed_daily.csv` | `monetary_sentinel` |
+| CryptoVision daily news | `data/news_sentiment/` | News desk in backtest |
+
+Details: [`docs/backtest-data.md`](docs/backtest-data.md).
+
 ### Running Backtests
 
 Run these **from the repository root** (the directory that contains `pyproject.toml`), after `uv sync --extra dev` (or `uv sync`). Requires an LLM key (`OPENAI_API_KEY` / `LLM_API_KEY` or `ATLASCLOUD_API_KEY`). LLM path dependence means re-runs are not bit-identical.
 
 ```bash
-# One-time: prefetch history for the locked eval window
-uv run python -m backtest.bootstrap_showcase --eval-steps 180 --until 2026-07-12
-
-# Offline CSV backtest (loads config/deploy.active.json)
-AIMM_BACKTEST_OHLCV_NEXUS=0 AIMM_BACKTEST_LLM_MAX_STEPS=200 uv run python -m backtest.run_demo \
+# Offline CSV backtest — uses pinned data/ (no prefetch)
+NEXUS_DISABLE=1 uv run python -m backtest run \
+  --deploy config/deploy.active.json \
   --symbols 'BTC/USDT,ETH/USDT,SOL/USDT' \
   --steps 180 \
-  --until 2026-07-12 \
   --csv-only \
   --timeframe 1d \
   --ticker BTC/USDT
 ```
 
-OHLCV-derived macro context feeds `monetary_sentinel` in backtest (no live Nexus, no look-ahead).
-See [`docs/backtest-data.md`](docs/backtest-data.md) for data layers and future Nexus agent wiring.
+Optional: `uv run python -m backtest.bootstrap_showcase` only if you need to **refresh** local CSVs. Day-to-day research should hit `data/` as shipped.
 
 Watch **stderr** for the per-bar transcript; stdout ends with JSON metrics;
 HTML report at `.runs/backtests/<run_id>/backtest_report.html`.
@@ -302,21 +316,24 @@ the **180 eval** bars only (`summary.json` → `eval_bars`, `ta_warmup_bars`). O
 
 Use `--no-warmup` only for fast A/B compares (indicators cold-start on bar 1; not for production reporting).
 
-### Example results (macro_tilt, 50 warmup + 180d eval, `bt_1784467270`)
+### Example results (top 10 earners)
 
-Reference run: **50-bar TA warmup**, **180 eval bars**, `macro_tilt`, leverage 2.0,
-OHLCV-only desk (`AIMM_BACKTEST_OHLCV_NEXUS=0`). Eval window 2025-11-25 → 2026-07-12.
-Reference run_id: `bt_1784467270`.
+Unique setups ranked by scored-book mean return (identical clone prints dropped). Default is rank 1 (`config/deploy.active.json`).
 
-| Metric | Strategy | BTC buy-and-hold |
-|--------|----------|------------------|
-| Return (eval window) | **+18.8%** | −34.2% |
-| Excess vs B&H | **+53.0%** | — |
-| Sharpe | **0.91** | — |
-| Max drawdown | 18.3% | — |
-| Trades | 34 | — |
-| Profit factor | **1.39** | — |
-| Regimes | bull, bear | — |
+| Rank | Deploy | Mean | Sharpe | Windows + |
+|------|--------|------|--------|-----------|
+| 1 | `deploy.active.json` (g49) | **+8.15%** | **1.71** | 2/2 |
+| 2 | `deploy.easy_short.json` | +6.48% | 1.66 | 2/2 |
+| 3 | `deploy.tight_sl.json` | +6.04% | 1.50 | 2/2 |
+| 4 | `deploy.tp8.json` | +5.82% | 1.43 | 2/2 |
+| 5 | `deploy.lev15.json` | +5.52% | 1.17 | 2/2 |
+| 6 | `deploy.stat_cot.json` | +5.03% | 1.43 | 1/2 |
+| 7 | `deploy.news_flow.json` | +4.13% | 1.02 | 2/2 |
+| 8 | `deploy.swing_sharpe.json` | +4.13% | 0.87 | 2/2 |
+| 9 | `deploy.ta_heavy.json` | +3.53% | 0.78 | 1/2 |
+| 10 | `deploy.sharpe_focus.json` | +3.46% | 0.68 | 1/2 |
+
+`swing_sharpe` is the only one also green on the locked 3-window release suite (2021 H2 / 2022 H1 / 2025 H1: **+2.58 / +11.10 / +0.59**, mean **+4.76%**). Small trade sample. Not a live-edge claim. `deploy.ohlcv_only.json` is CI wiring only.
 
 Research helpers (period sweep, preset compare) live under `out/scripts/` (gitignored scratch).
 
@@ -324,10 +341,10 @@ Research helpers (period sweep, preset compare) live under `out/scripts/` (gitig
 
 | Knob | Recommendation | Why |
 |------|----------------|-----|
-| **Desk combo** | `macro_tilt` in `config/deploy.active.json`: `technical_ta_engine`×0.55 (`llm_enabled`), `monetary_sentinel`×0.25, `pattern_recognition_bot`×0.15 | Static weights; TA CoT + `arbitrator_llm`; leverage 2.0 |
-| **Horizon** | `--steps 180` daily (50 warmup + 180 eval) | Best return/Sharpe balance in period sweep |
-| **Period lock** | `--until 2026-07-12` | Pin eval end date when CSV grows |
-| **Data** | `bootstrap_showcase --eval-steps 180 --until 2026-07-12` → `--csv-only` | Enough history for offline reruns |
+| **Desk combo** | Rank-1 `g49` in `config/deploy.active.json` | Highest scored-book mean (+8.15% / 1.71) |
+| **Horizon** | `--steps 180` daily (50 warmup + 180 eval) | Enough bars for TA + a later OOS window |
+| **Period lock** | `--until` a pinned date | Pin eval end date when CSV grows |
+| **Data** | Pinned `data/` + `--csv-only` | Same tape as the catalog; see `data/MANIFEST.json` |
 | **OHLCV context** | `AIMM_BACKTEST_OHLCV_NEXUS=0` | OHLCV-only desk; defers live Nexus |
 | **Nexus desks** | Enable in deploy JSON when you have historical feeds | See `docs/backtest-data.md` |
 | **Symbols** | BTC + ETH + SOL | Multi-asset book; transcript defaults to `--ticker` only |
@@ -337,7 +354,7 @@ Research helpers (period sweep, preset compare) live under `out/scripts/` (gitig
 ```bash
 # Desk list + LLM flags come from config/deploy.active.json
 NEXUS_DISABLE=1 AIMM_BACKTEST_LLM_MAX_STEPS=200 \
-  uv run python -m backtest.run_demo \
+  uv run python -m backtest run \
   --deploy config/deploy.active.json \
   --symbols 'BTC/USDT,ETH/USDT,SOL/USDT' --steps 180 --until 2026-07-12 --online --timeframe 1d --ticker BTC/USDT
 ```
@@ -379,12 +396,13 @@ Like TradingAgents, results vary with model and window — report benchmark, sam
 
 ### Example Backtest Results
 
-Re-run after setting your LLM key — results depend on provider, model, and the rolling `--online` window:
+Re-run after setting your LLM key — results depend on provider and model. Prefer pinned `data/` over a live window:
 
 ```bash
-NEXUS_DISABLE=1 uv run python -m backtest.run_demo \
+NEXUS_DISABLE=1 uv run python -m backtest run \
+  --deploy config/deploy.active.json \
   --symbols 'BTC/USDT,ETH/USDT,SOL/USDT' \
-  --steps 365 --online --timeframe 1d --ticker BTC/USDT
+  --steps 180 --csv-only --timeframe 1d --ticker BTC/USDT
 ```
 
 Report: `.runs/backtests/<run_id>/backtest_report.html`
@@ -476,7 +494,8 @@ ai-market-maker/
 │   └── api/                # FastAPI endpoints
 ├── web/                    # Next.js dashboard
 ├── openclaw/               # OpenClaw skill definitions
-├── config/                 # deploy.active.json (strategy) + policy/app defaults
+├── config/                 # deploy.*.json (strategy) + policy/app defaults
+├── data/                   # pinned OHLCV, funding, macro, news + MANIFEST.json
 ├── assets/                 # Branding
 ├── docs/                   # Detailed documentation
 ├── tests/                  # Test suite

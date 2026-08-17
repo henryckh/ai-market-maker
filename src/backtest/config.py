@@ -86,6 +86,7 @@ def resolve_backtest_config(
         "max_hold_bars": 0,
         "deploy_path": "",
         "deploy_loaded": False,
+        "deploy_description": "",
         "source_description": "defaults",
     }
 
@@ -154,6 +155,10 @@ def resolve_backtest_config(
         if isinstance(profile, dict) and profile.get("profile_id"):
             result["profile_id"] = str(profile["profile_id"])
 
+        desc = deploy_cfg.get("description")
+        if isinstance(desc, str) and desc.strip():
+            result["deploy_description"] = desc.strip()
+
         lev = exec_cfg.get("leverage") or result["leverage"]
         mhb = exec_cfg.get("max_hold_bars") or result["max_hold_bars"]
         result["leverage"] = float(lev) if lev else 2.0
@@ -208,12 +213,17 @@ def set_env_from_config(cfg: dict[str, Any]) -> None:
     os.environ.pop("AIMM_LLM_AGENTS", None)
     os.environ.pop("AIMM_LLM_DESK_DEBATE", None)
     os.environ["MODE"] = "backtest"
+    os.environ["NEXUS_DISABLE"] = "1"
 
     if cfg.get("deploy_path"):
         os.environ["AIMM_DEPLOY_CONFIG_PATH"] = str(cfg["deploy_path"])
 
     if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") is None:
         os.environ["AIMM_BACKTEST_VERBOSE_RECEIPTS"] = "1"
+
+    # Desk CoT does not read this file; arbitrator / portfolio LLM do.
+    # Default to the active-trader overlay so backtests are not Buffett-conservative.
+    os.environ.setdefault("AIMM_AGENT_PROMPTS_PATH", "config/agent_prompts.active.json")
 
     from backtest.terminal_log import configure_backtest_terminal_logging
 

@@ -56,6 +56,10 @@ class NewsNarrativeMinerAgent:
                 decay_factor = (
                     first_float(nad, "decayFactor", "half_life_hours", default=0.0) or None
                 )
+        if agg_breaker <= 0:
+            news_data = as_dict(unwrap_data(_ep(nexus_context, "news").get("data")))
+            agg = as_dict(news_data.get("aggregate"))
+            agg_breaker = first_float(agg, "impact_score", "News_Impact_Score")
 
         if not items and agg_breaker <= 0:
             return {

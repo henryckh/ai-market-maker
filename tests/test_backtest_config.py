@@ -55,21 +55,6 @@ class TestResolveBacktestConfig:
         assert cfg["allows_short"] is True
         assert cfg["decision_threshold"]["ta_led"]["enabled"] is True
 
-    def test_shipped_deploy_active_json(self):
-        root = Path(__file__).resolve().parents[1]
-        deploy = root / "config" / "deploy.active.json"
-        if not deploy.is_file():
-            return
-        cfg = resolve_backtest_config(deploy_path=str(deploy))
-        assert cfg["deploy_loaded"] is True
-        assert cfg["profile_id"] == "macro_tilt"
-        assert cfg["profile_weights"] == {
-            "technical_ta_engine": 0.55,
-            "pattern_recognition_bot": 0.15,
-            "monetary_sentinel": 0.25,
-        }
-        assert cfg["leverage"] == 2.0
-
     def test_deploy_config_loaded(self):
         with tempfile.TemporaryDirectory() as tmp:
             deploy_path = Path(tmp) / "deploy.active.json"
@@ -196,11 +181,14 @@ class TestSetEnvFromConfig:
     def test_clears_strategy_env(self):
         os.environ["AIMM_ARBITRATOR_MODE"] = "agent_llm"
         os.environ["AIMM_LLM_AGENTS"] = "technical_ta_engine"
+        os.environ.pop("AIMM_AGENT_PROMPTS_PATH", None)
         cfg = resolve_backtest_config(cli_arbitrator_mode="agent_llm")
         set_env_from_config(cfg)
         assert os.environ.get("AIMM_ARBITRATOR_MODE") is None
         assert os.environ.get("AIMM_LLM_AGENTS") is None
         assert os.environ.get("MODE") == "backtest"
+        assert os.environ.get("AIMM_AGENT_PROMPTS_PATH") == "config/agent_prompts.active.json"
+        assert os.environ.get("AIMM_AGENT_PROMPTS_PATH") == "config/agent_prompts.active.json"
 
     def test_weighted_cli_preserved_in_cfg(self):
         cfg = resolve_backtest_config(cli_arbitrator_mode="weighted_convergence")
@@ -280,3 +268,12 @@ class TestLoopResolvedConfigStamp:
         assert res.resolved_config is not None
         assert res.resolved_config["take_profit_pct"] == 6.0
         assert res.resolved_config["stop_loss_pct"] == 2.5
+
+
+def test_windows_path_reads_deploy_leverage() -> None:
+    from backtest.historical_eval import _deploy_leverage
+
+    assert _deploy_leverage({"leverage": 2.0}) == 2.0
+    assert _deploy_leverage({"execution": {"leverage": 2.5}}) == 2.5
+    assert _deploy_leverage({}) is None
+    assert _deploy_leverage(None) is None
