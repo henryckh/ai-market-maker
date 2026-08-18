@@ -1,3 +1,4 @@
+from backtest.historical_eval import build_aggregate, summarize_execution_trades
 from backtest.metrics import (
     compute_basic_metrics,
     max_drawdown,
@@ -44,3 +45,50 @@ def test_compute_basic_metrics_smoke():
     assert 0 <= m.win_rate <= 1
     assert m.periods_per_year >= 300
     assert m.profit_factor is not None
+
+
+def test_summarize_execution_trades_counts_direction_round_trips():
+    trades = [{"direction": 1, "pnl": 12.0}, {"direction": -1, "pnl": -4.0}]
+    summary = summarize_execution_trades(trades)
+    assert summary["buy_fills"] == 1
+    assert summary["sell_fills"] == 1
+    assert summary["fills"] == 2
+    assert summary["opened_position"] is True
+    assert summary["round_trip_evidence"] is True
+
+
+def test_summarize_execution_trades_still_reads_side():
+    trades = [{"side": "buy"}, {"side": "SELL"}]
+    summary = summarize_execution_trades(trades)
+    assert summary["buy_fills"] == 1
+    assert summary["sell_fills"] == 1
+
+
+def test_aggregate_includes_mean_sharpe():
+    windows = [
+        {
+            "total_return_pct": 9.5,
+            "metrics": {"sharpe": 2.5, "max_drawdown_pct": 4.5, "profit_factor": 3.6},
+            "benchmark": {
+                "benchmark_buy_hold_equity_return_pct": -24.0,
+                "excess_return_vs_buy_hold_equity_pct": 33.5,
+            },
+            "execution": {},
+            "quality": {},
+        },
+        {
+            "total_return_pct": 3.3,
+            "metrics": {"sharpe": 0.8, "max_drawdown_pct": 4.0, "profit_factor": 1.6},
+            "benchmark": {
+                "benchmark_buy_hold_equity_return_pct": -50.0,
+                "excess_return_vs_buy_hold_equity_pct": 53.3,
+            },
+            "execution": {},
+            "quality": {},
+        },
+    ]
+    agg = build_aggregate(windows)
+    assert agg["windows_beat_buy_hold_equity"] == 2
+    assert agg["mean_sharpe"] == 1.65
+    assert agg["mean_max_drawdown_pct"] == 4.25
+    assert agg["mean_profit_factor"] == 2.6

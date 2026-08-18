@@ -7,7 +7,7 @@ Examples::
 
 Then run offline from cache::
 
-    uv run python -m backtest.run_demo \\
+    uv run python -m backtest run \\
       --symbols 'BTC/USDT,ETH/USDT,SOL/USDT' \\
       --steps 180 --until 2026-07-12 --csv-only --timeframe 1d --ticker BTC/USDT
 """
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="YYYY-MM-DD",
         help=(
-            "Prefetch enough history so ``run_demo --csv-only --until`` still has "
+            "Prefetch enough history so ``backtest run --csv-only --until`` still has "
             "warmup+eval bars through this date."
         ),
     )
@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     until_flag = f" --until {until}" if until else ""
     print(
         "\n[bootstrap] done. Run default backtest (offline after first prefetch):\n"
-        f"  uv run python -m backtest.run_demo \\\n"
+        f"  uv run python -m backtest run \\\n"
         f"    --symbols '{sym_arg}' --steps {int(args.eval_steps)}{until_flag} \\\n"
         f"    --csv-only --timeframe {tf} --ticker {symbols[0]}\n",
         file=sys.stderr,

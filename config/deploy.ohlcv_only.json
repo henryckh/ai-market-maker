@@ -1,4 +1,5 @@
 {
+  "description": "No-LLM smoke: TA + pattern only. CSV wiring / CI, not a return claim.",
   "profile": {
     "profile_id": "ohlcv_only"
   },

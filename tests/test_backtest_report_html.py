@@ -159,6 +159,8 @@ def test_report_html_minimal_run():
         )
         html = build_backtest_report_html(run_dir)
         assert "Executive Summary" in html
+        assert "Equity vs BTC buy-and-hold" in html
+        assert "Account NAV" not in html
         assert "Chart" in html or "equityChart" in html
         assert "BTC/USDT" in html
         assert "bt_test" in html

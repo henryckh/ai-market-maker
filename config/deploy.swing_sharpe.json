@@ -1,0 +1,57 @@
+{
+  "description": "Rank 8. TA\u00d70.60 CoT, 8% TP / 2.5% SL. Scored book +4.13% / 0.87 (2/2). Honest 3-window release suite: +4.76%, all three windows green.",
+  "profile": {
+    "profile_id": "swing_sharpe"
+  },
+  "agents": {
+    "technical_ta_engine": {
+      "weight": 0.6,
+      "llm_enabled": true,
+      "enabled": true
+    },
+    "pattern_recognition_bot": {
+      "weight": 0.15,
+      "llm_enabled": false,
+      "enabled": true
+    },
+    "monetary_sentinel": {
+      "weight": 0.25,
+      "llm_enabled": false,
+      "enabled": true
+    }
+  },
+  "decision_threshold": {
+    "buy": {
+      "min_composite": 55,
+      "min_confidence": 22
+    },
+    "sell": {
+      "max_composite": 40,
+      "min_confidence": 22
+    },
+    "hold": {
+      "else": true
+    },
+    "alignment_gating": {
+      "enabled": true,
+      "min_factors_for_directional": 2,
+      "risk_override_if_blocked": true
+    },
+    "ta_led": {
+      "enabled": true,
+      "agent_id": "technical_ta_engine",
+      "buy_min_composite": 58,
+      "sell_max_composite": 42,
+      "min_confidence": 18
+    }
+  },
+  "execution": {
+    "use_llm_synthesis": true,
+    "desk_debate_llm": false,
+    "arbitrator_llm": true,
+    "allows_short": true,
+    "leverage": 2.0,
+    "take_profit_pct": 0.08,
+    "stop_loss_pct": 0.025
+  }
+}

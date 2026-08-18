@@ -1,79 +1,20 @@
-"""Multi-step backtest CLI: **online** exchange candles (public fetch) or cached CSV (offline).
+"""One-period backtest (load bars → engine → report).
 
-Public defaults for strategy env vars live in ``config/app.default.json`` (``strategy.*``).
+Public CLI::
 
-**CSV cache:** ``--ohlcv-cache-dir DIR`` (or ``config/app.default.json`` ``market.ohlcv_cache_dir``) stores one ``.csv`` per
-symbol/timeframe; combine with ``--online`` to fill on first run and reuse later. ``--csv-only``
-runs fully offline from that folder (populate via ``python -m backtest.prefetch_ohlcv``).
+    python -m backtest run ...
 
-Online (Binance public ``fetch_ohlcv``, no API keys)::
-
-    uv run python -m backtest.run_demo --online --steps 90 --timeframe 1d
-
-Multi-symbol (aligned OHLCV; same portfolio path as production graph). If you omit ``--symbols``:
-
-- **Static (default):** uses ``config/app.default.json`` ``market.universe_symbols`` (capped by ``market.universe_size``).
-
-Examples::
-
-    NEXUS_DISABLE=1 uv run python -m backtest.run_demo --steps 80 --online --timeframe 1d
-
-~6 months daily, dynamic top-liquid universe, frequent-style env (no ``--symbols``)::
-
-    NEXUS_DISABLE=1 uv run python -m backtest.run_demo --online --timeframe 1d --steps 184
-
-Single-symbol (legacy)::
-
-    uv run python -m backtest.run_demo --ticker-only --steps 40 --online --timeframe 1d
-
-Long horizon (monthly candles ≈ years of history; fewer LLM calls than daily)::
-
-    uv run python -m backtest.run_demo --online --timeframe 1M --steps 36 --llm
-
-Expand history until at least one simulated fill (cap ``--max-fetch``)::
-
-    uv run python -m backtest.run_demo --online --min-trades 1 --steps 40 --max-fetch 200
-
-Use Tier-2 LLM arbitrator (one LLM call per bar; set API keys in ``.env``).
-Steps are capped by ``AIMM_BACKTEST_LLM_MAX_STEPS`` (default **120**) unless you raise it::
-
-    uv run python -m backtest.run_demo --llm --steps 15
-    AIMM_BACKTEST_LLM_MAX_STEPS=200 uv run python -m backtest.run_demo --online --timeframe 1d --steps 180 --llm
-
-Frequent-trading **style** (more signals / sizing from aggressive + active + rule floors) works on **daily**
-bars too — you get one graph step per day but **more symbols** and **longer calendars** for trade count.
-Optional LLM: raise ``AIMM_BACKTEST_LLM_MAX_STEPS`` to at least ``--steps`` or the run is truncated.
-
-Hourly (shorter calendar, more steps per week)::
-
-    NEXUS_DISABLE=1 AIMM_STRATEGY_PRESET=aggressive AIMM_TRADING_STYLE=active \\
-      AIMM_BACKTEST_LLM_MAX_STEPS=60 AIMM_RULE_SENTIMENT_BUY_MIN=45 \\
-      uv run python -m backtest.run_demo --llm --online --timeframe 1h --steps 60 --ticker BTC/USDT
-
-Daily ~half-year + dynamic universe + LLM (expensive: ~184 LLM calls)::
-
-    NEXUS_DISABLE=1 AIMM_BACKTEST_LLM_MAX_STEPS=200 \\
-      uv run python -m backtest.run_demo --llm --online --timeframe 1d --steps 184 --ticker BTC/USDT
-
-Each bar appends one row to ``.runs/backtests/<run_id>/iterations.jsonl`` (stance, trade_intent,
-execution stub, ``llm_arbitrator`` flag) — similar in spirit to a per-cycle AI report.
-
-**Multi-year / anchored windows** (fixed calendar ranges + aggregate JSON/Markdown report)::
-
-    NEXUS_DISABLE=1 uv run python -m backtest.run_historical_eval --suite daily
+``session`` is a deprecated alias for the same command.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
-
-from dotenv import load_dotenv
 
 from backtest.bars import (
     align_bars_by_min_length,
@@ -83,7 +24,7 @@ from backtest.bars import (
 )
 from backtest.loop import run_multi_step_backtest
 from backtest.ohlcv_csv_cache import ensure_bars_cached
-from config.app_settings import apply_strategy_env_defaults_from_settings, load_app_settings
+from config.app_settings import load_app_settings
 
 try:
     from config.leaderboard_submit import load_leaderboard_submit_config
@@ -100,10 +41,14 @@ def _infer_interval_sec_from_bars(bars: list[list[float]]) -> int:
     return max(60, int(dt_ms / 1000.0))
 
 
-def build_run_demo_parser() -> argparse.ArgumentParser:
+def build_run_parser() -> argparse.ArgumentParser:
     _def_ticker = load_app_settings().market.default_ticker
     parser = argparse.ArgumentParser(
-        description="Multi-step backtest (real OHLCV via exchange or cached CSV)."
+        prog="python -m backtest run",
+        description=(
+            "One-period backtest: a single continuous bar range "
+            "(real OHLCV via exchange or cached CSV)."
+        ),
     )
     parser.add_argument(
         "--ticker",
@@ -279,7 +224,7 @@ def build_run_demo_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_run_demo_symbols(
+def resolve_session_symbols(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> tuple[list[str], str]:
     """Return ``(sym_list, primary)``. Empty ``sym_list`` selects single-asset mode."""
@@ -297,12 +242,12 @@ def resolve_run_demo_symbols(
             parser.error("--symbols requires at least two pairs (comma-separated)")
         if int(args.min_trades) > 0:
             print(
-                "[run_demo] ignoring --min-trades for multi-symbol run",
+                "[backtest] ignoring --min-trades for multi-symbol run",
                 file=sys.stderr,
             )
         if float(args.deploy_spot_pct) > 0:
             print(
-                "[run_demo] ignoring --deploy-spot-pct for multi-symbol run",
+                "[backtest] ignoring --deploy-spot-pct for multi-symbol run",
                 file=sys.stderr,
             )
         primary = str(args.ticker) if str(args.ticker) in sym_list else sym_list[0]
@@ -401,12 +346,12 @@ def _load_csv_bars_for_demo(
     return _trailing_bars_locked(load_ohlcv_csv(path), limit=limit, until=until, symbol=symbol)
 
 
-def execute_run_demo(
+def execute_run(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     deploy_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    sym_list, primary = resolve_run_demo_symbols(args, parser)
+    sym_list, primary = resolve_session_symbols(args, parser)
     run_leverage = _resolve_run_leverage(args, deploy_config)
     take_profit_pct, stop_loss_pct = _resolve_tp_sl_pct(args, deploy_config)
     runs_dir_path = Path(args.runs_dir).expanduser() if args.runs_dir else None
@@ -423,7 +368,7 @@ def execute_run_demo(
     if bool(getattr(args, "csv_only", False)) and not ohlcv_cache:
         parser.error("--csv-only requires --ohlcv-cache-dir (or set market.ohlcv_cache_dir)")
     if bool(getattr(args, "csv_only", False)) and bool(args.online):
-        print("[run_demo] --csv-only: using cached CSVs only (no exchange fetch).", file=sys.stderr)
+        print("[backtest] --csv-only: using cached CSVs only (no exchange fetch).", file=sys.stderr)
 
     tf = args.timeframe or interval_sec_to_ccxt_timeframe(args.interval_sec)
     limit = max(2, int(args.steps))
@@ -874,71 +819,6 @@ def execute_run_demo(
     return out
 
 
-def main(argv: list[str] | None = None) -> dict[str, Any]:
-    load_dotenv()
-    apply_strategy_env_defaults_from_settings(load_app_settings())
-    parser = build_run_demo_parser()
-    args = parser.parse_args(argv)
-
-    from config.llm_env import require_llm_key
-
-    require_llm_key()
-
-    if args.quality:
-        if not args.steps or args.steps < 200:
-            args.steps = 200
-        if args.min_trades < 30:
-            args.min_trades = 30
-        if args.tp_sl_pct <= 0:
-            args.tp_sl_pct = 5.0
-        if not args.forward_validate:
-            args.forward_validate = True
-        # Auto-enable verbose receipts for quality runs (T14)
-        if os.environ.get("AIMM_BACKTEST_VERBOSE_RECEIPTS") is None:
-            os.environ["AIMM_BACKTEST_VERBOSE_RECEIPTS"] = "1"
-        print(
-            "[quality] preset: --steps 200 --min-trades 30 --tp-sl-pct 5 --forward-validate",
-            file=sys.stderr,
-        )
-
-    from backtest.config import resolve_backtest_config, set_env_from_config
-
-    cli_mode = args.mode
-    if args.llm and cli_mode is None:
-        cli_mode = "agent_llm"
-
-    bt_cfg = resolve_backtest_config(
-        deploy_path=args.deploy,
-        cli_arbitrator_mode=cli_mode,
-        cli_tp_sl_pct=args.tp_sl_pct if args.tp_sl_pct > 0 else None,
-        cli_leverage=args.leverage,
-    )
-
-    set_env_from_config(bt_cfg)
-
-    out = execute_run_demo(args, parser, deploy_config=bt_cfg)
-    actual_lev = bt_cfg["leverage"]
-    try:
-        sp = Path(out.get("summary_path", ""))
-        if sp.is_file():
-            actual_lev = json.loads(sp.read_text(encoding="utf-8")).get("leverage", actual_lev)
-    except Exception:
-        pass
-    out["resolved_config"] = {
-        "arbitrator_mode": bt_cfg["arbitrator_mode"],
-        "deploy_loaded": bt_cfg["deploy_loaded"],
-        "deploy_path": bt_cfg["deploy_path"],
-        "profile_id": bt_cfg["profile_id"],
-        "profile_weights": bt_cfg.get("profile_weights", {}),
-        "take_profit_pct": bt_cfg["take_profit_pct"],
-        "stop_loss_pct": bt_cfg["stop_loss_pct"],
-        "leverage": actual_lev,
-        "source_description": bt_cfg["source_description"],
-        "agent_led_symbols": bt_cfg.get("agent_led_symbols", []),
-    }
-    print(json.dumps(out, indent=2), flush=True)
-    return out
-
-
-if __name__ == "__main__":
-    main()
+# Pre-rename names. CLI is ``python -m backtest run``.
+build_session_parser = build_run_parser
+execute_session = execute_run

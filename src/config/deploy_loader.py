@@ -176,6 +176,17 @@ def get_deploy_profile_id() -> str | None:
     return cfg.get("profile", {}).get("profile_id")
 
 
+def get_deploy_description() -> str | None:
+    """Human note on the deploy JSON. Ignored by trading logic."""
+    cfg = load_deploy_config()
+    if cfg is None:
+        return None
+    desc = cfg.get("description")
+    if isinstance(desc, str) and desc.strip():
+        return desc.strip()
+    return None
+
+
 def get_decision_threshold() -> dict[str, Any] | None:
     cfg = load_deploy_config()
     if cfg is None:
@@ -196,6 +207,7 @@ __all__ = [
     "get_enabled_agent_names",
     "resolve_tier0_graph_nodes",
     "get_deploy_profile_id",
+    "get_deploy_description",
     "get_decision_threshold",
     "get_arbitrator_llm",
 ]

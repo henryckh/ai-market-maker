@@ -79,10 +79,10 @@ def run_backtest(symbols="BTC/USDT,ETH/USDT,SOL/USDT", steps=100):
     """Run backtest"""
     print(f"📈 Running backtest for {symbols} ({steps} steps)")
     try:
-        from src.backtest.run_demo import main as backtest_main
+        from backtest.__main__ import main as backtest_main
 
-        sys.argv = [
-            "run_demo.py",
+        argv = [
+            "run",
             "--symbols",
             symbols,
             "--steps",
@@ -95,12 +95,9 @@ def run_backtest(symbols="BTC/USDT,ETH/USDT,SOL/USDT", steps=100):
             "--initial-cash",
             "10000",
         ]
-
-        # Add --ticker-only if only one symbol
         if len(symbols.split(",")) == 1:
-            sys.argv.append("--ticker-only")
-
-        return backtest_main()
+            argv.extend(["--ticker-only", "--ticker", symbols.split(",")[0].strip()])
+        return backtest_main(argv)
     except Exception as e:
         print(f"❌ Backtest error: {e}")
         import traceback

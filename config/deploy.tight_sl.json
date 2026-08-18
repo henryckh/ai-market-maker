@@ -1,0 +1,67 @@
+{
+  "description": "Rank 3. g49 desks, 1.5% SL. Mean +6.04% / Sharpe 1.50, 2/2 windows.",
+  "profile": {
+    "profile_id": "tight_sl"
+  },
+  "agents": {
+    "technical_ta_engine": {
+      "weight": 0.35,
+      "llm_enabled": true,
+      "enabled": true
+    },
+    "monetary_sentinel": {
+      "weight": 0.2,
+      "llm_enabled": false,
+      "enabled": true
+    },
+    "news_narrative_miner": {
+      "weight": 0.2,
+      "llm_enabled": true,
+      "enabled": true
+    },
+    "pattern_recognition_bot": {
+      "weight": 0.15,
+      "llm_enabled": false,
+      "enabled": true
+    },
+    "statistical_alpha_engine": {
+      "llm_enabled": false,
+      "enabled": true,
+      "weight": 0.1
+    }
+  },
+  "decision_threshold": {
+    "buy": {
+      "min_composite": 53,
+      "min_confidence": 16
+    },
+    "sell": {
+      "max_composite": 41,
+      "min_confidence": 26
+    },
+    "hold": {
+      "else": true
+    },
+    "alignment_gating": {
+      "enabled": true,
+      "min_factors_for_directional": 2,
+      "risk_override_if_blocked": true
+    },
+    "ta_led": {
+      "enabled": true,
+      "agent_id": "technical_ta_engine",
+      "buy_min_composite": 57,
+      "sell_max_composite": 43,
+      "min_confidence": 14
+    }
+  },
+  "execution": {
+    "use_llm_synthesis": true,
+    "desk_debate_llm": false,
+    "arbitrator_llm": true,
+    "allows_short": true,
+    "leverage": 2.0,
+    "stop_loss_pct": 0.015,
+    "take_profit_pct": 0.0
+  }
+}

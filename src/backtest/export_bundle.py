@@ -196,6 +196,8 @@ def write_audit_ledger(
                             "trade_intent": trade_intent,
                         },
                         "tier0_summary": row.get("tier0_summary", []),
+                        "cot": row.get("cot") or [],
+                        "nexus_asof": row.get("nexus_asof") or {},
                         "data_quality": row.get("data_quality"),
                         "memory_fragment": row.get("memory") or row.get("memory_fragment"),
                     }
