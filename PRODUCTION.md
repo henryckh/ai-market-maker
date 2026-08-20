@@ -8,16 +8,16 @@ This repo can run as a small production platform:
 
 ### Requirements
 - Docker + Docker Compose
-- Unique `AIMM_API_KEY` and `AIMM_AUTH_SECRET`. If you leave them
+- Unique `AIMM_API_KEY`, `AIMM_AUTH_SECRET`, and `POSTGRES_PASSWORD`. If you leave them
   empty, `docker compose` generates them into `./.secrets/` on first boot.
 
 ### Environment variables
 Create a `.env` next to `docker-compose.prod.yml`:
 
 ```bash
-# Database
-POSTGRES_PASSWORD=change-me
-DATABASE_URL=postgresql+psycopg://aimm:${POSTGRES_PASSWORD}@db:5432/aimm
+# Database (empty POSTGRES_PASSWORD = generate into .secrets/)
+POSTGRES_PASSWORD=
+# DATABASE_URL=
 
 # Auth (empty = auto-generate into .secrets/)
 AIMM_ENV=production
@@ -70,3 +70,4 @@ Notes:
 - Put a reverse proxy with TLS in front of any public bind
 - Leave `AIMM_CORS_ORIGINS` empty unless a browser must call the API cross-origin
 - Keep `PLATFORM_WORKER_AUTO_EXECUTE=0` unless you explicitly want it
+- Set `POSTGRES_PASSWORD` to a long random value, or leave it empty to generate one (do not map `5433` to `0.0.0.0`)

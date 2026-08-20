@@ -36,8 +36,8 @@ This repo includes a lightweight platform surface:
 ### Local Postgres (optional but recommended)
 
 ```bash
-docker compose up -d
-export DATABASE_URL="postgresql+psycopg://aimm:aimm@127.0.0.1:5432/aimm"
+docker compose -f docker-compose.leaderboard.yml up -d
+export DATABASE_URL="postgresql+psycopg://aimm:$(cat .secrets/postgres_password)@127.0.0.1:5433/aimm"
 ```
 
 ### Publish a provider result (signed)

@@ -26,6 +26,7 @@ from .capabilities_routes import router as capabilities_router
 from .config_designer_routes import router as config_designer_router
 from .control_plane_secrets import (
     ensure_control_plane_secrets,
+    ensure_postgres_password,
     is_usable_secret,
     presented_matches,
 )
@@ -66,6 +67,7 @@ DEFAULT_TAIL_MESSAGE_LOG = int((os.getenv("AIMM_UI_TAIL_MESSAGES") or "600").str
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     ensure_control_plane_secrets(generate=True)
+    ensure_postgres_password(generate=True)
     # Daemon backtest threads die on restart; flip orphaned job.json out of "running".
     try:
         recover_stale_backtest_jobs(reason="api_startup")

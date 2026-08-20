@@ -1,4 +1,4 @@
-"""AIMM_API_KEY / AIMM_AUTH_SECRET: env, then .secrets/, else generate once."""
+"""AIMM_API_KEY / AIMM_AUTH_SECRET / POSTGRES_PASSWORD: env, then .secrets/, else generate once."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ DISABLE_GENERATE_ENV = "AIMM_DISABLE_SECRET_GENERATE"
 
 API_KEY_FILENAME = "api_key"
 AUTH_SECRET_FILENAME = "auth_secret"
+POSTGRES_PASSWORD_ENV = "POSTGRES_PASSWORD"
+POSTGRES_PASSWORD_FILENAME = "postgres_password"
+DATABASE_URL_ENV = "DATABASE_URL"
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -75,9 +78,16 @@ def _replace_secret_file(path: Path, value: str) -> None:
     os.replace(tmp, path)
 
 
-def persist_secrets(api_key: str, auth_secret: str) -> None:
+def persist_secrets(
+    api_key: str,
+    auth_secret: str,
+    postgres_password: str | None = None,
+) -> None:
     dest = secrets_dir()
-    for name, value in ((API_KEY_FILENAME, api_key), (AUTH_SECRET_FILENAME, auth_secret)):
+    pairs = [(API_KEY_FILENAME, api_key), (AUTH_SECRET_FILENAME, auth_secret)]
+    if postgres_password:
+        pairs.append((POSTGRES_PASSWORD_FILENAME, postgres_password))
+    for name, value in pairs:
         path = dest / name
         existing = None
         try:
@@ -135,6 +145,73 @@ def resolve_auth_secret(*, generate: bool = False) -> str | None:
     return resolve_secret(AUTH_SECRET_ENV, AUTH_SECRET_FILENAME, generate=generate)
 
 
+def _database_url_from_env() -> str | None:
+    return (os.getenv(DATABASE_URL_ENV) or "").strip() or None
+
+
+DEFAULT_POSTGRES_PORT = "5433"
+
+
+def _parse_database_url(url: str):
+    from urllib.parse import urlparse
+
+    normalized = url
+    for prefix in ("postgresql+psycopg://", "postgresql+asyncpg://"):
+        if normalized.startswith(prefix):
+            normalized = "postgresql://" + normalized[len(prefix) :]
+            break
+    return urlparse(normalized)
+
+
+def _should_build_database_url(url: str | None) -> bool:
+    if not url:
+        return True
+    return (_parse_database_url(url).hostname or "").lower() == "db"
+
+
+def build_database_url(password: str) -> str:
+    from urllib.parse import quote
+
+    user = (os.getenv("POSTGRES_USER") or "aimm").strip() or "aimm"
+    host = (os.getenv("POSTGRES_HOST") or "db").strip() or "db"
+    name = (os.getenv("POSTGRES_DB") or "aimm").strip() or "aimm"
+    port = (os.getenv("POSTGRES_PORT") or DEFAULT_POSTGRES_PORT).strip() or DEFAULT_POSTGRES_PORT
+    return (
+        f"postgresql+psycopg://{quote(user, safe='')}:{quote(password, safe='')}"
+        f"@{host}:{port}/{quote(name, safe='')}"
+    )
+
+
+def _apply_postgres_password(password: str) -> None:
+    os.environ[POSTGRES_PASSWORD_ENV] = password
+    if _should_build_database_url(_database_url_from_env()):
+        os.environ[DATABASE_URL_ENV] = build_database_url(password)
+
+
+def ensure_postgres_password(*, generate: bool = True) -> str | None:
+    from_env = _from_env(POSTGRES_PASSWORD_ENV)
+    if from_env:
+        _apply_postgres_password(from_env)
+        return from_env
+    path = secrets_dir() / POSTGRES_PASSWORD_FILENAME
+    loaded = _read_secret_file(path)
+    if loaded:
+        _apply_postgres_password(loaded)
+        return loaded
+    if not (generate and not _generate_disabled()):
+        return None
+    created = generate_secret()
+    try:
+        _write_secret_file(path, created)
+        loaded = created
+    except FileExistsError:
+        loaded = _read_secret_file(path)
+    if not loaded:
+        return None
+    _apply_postgres_password(loaded)
+    return loaded
+
+
 def ensure_control_plane_secrets(*, generate: bool = True) -> tuple[str, str]:
     do_generate = generate and not _generate_disabled()
     api_key = resolve_api_key(generate=do_generate)
@@ -184,20 +261,29 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         api_key, auth_secret = ensure_control_plane_secrets(generate=True)
+        postgres_password = ensure_postgres_password(generate=True)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     dest = secrets_dir()
     if args.write:
-        persist_secrets(api_key, auth_secret)
+        persist_secrets(api_key, auth_secret, postgres_password=postgres_password)
     if args.write or not args.export_shell:
-        print(f"secrets ready under {dest}/ ({API_KEY_FILENAME}, {AUTH_SECRET_FILENAME})")
+        names = f"{API_KEY_FILENAME}, {AUTH_SECRET_FILENAME}"
+        if postgres_password:
+            names += f", {POSTGRES_PASSWORD_FILENAME}"
+        print(f"secrets ready under {dest}/ ({names})")
 
     if args.export_shell:
         print(f"export {API_KEY_ENV}={shlex.quote(api_key)}")
         print(f"export {AUTH_SECRET_ENV}={shlex.quote(auth_secret)}")
         print(f"export {SECRETS_DIR_ENV}={shlex.quote(str(dest))}")
+        if postgres_password:
+            print(f"export {POSTGRES_PASSWORD_ENV}={shlex.quote(postgres_password)}")
+            db_url = _database_url_from_env() or os.getenv(DATABASE_URL_ENV) or ""
+            if db_url:
+                print(f"export {DATABASE_URL_ENV}={shlex.quote(db_url)}")
 
     return 0
 

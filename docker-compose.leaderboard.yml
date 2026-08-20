@@ -10,6 +10,7 @@ services:
       AIMM_SECRETS_DIR: /run/aimm-secrets
       AIMM_API_KEY: ${AIMM_API_KEY:-}
       AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     volumes:
       - ./.secrets:/run/aimm-secrets
     command: ["python", "-m", "api.control_plane_secrets", "--write"]
@@ -18,15 +19,20 @@ services:
   db:
     image: postgres:16-alpine
     environment:
+      PGPORT: "5433"
       POSTGRES_DB: aimm
       POSTGRES_USER: aimm
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aimm}
+      POSTGRES_PASSWORD_FILE: /run/aimm-secrets/postgres_password
     volumes:
-      - lb_pgdata:/var/lib/postgresql/data
+      - lb_pg5433:/var/lib/postgresql/data
+      - ./.secrets:/run/aimm-secrets:ro
     ports:
-      - "${POSTGRES_PUBLISH:-127.0.0.1:5432}:5432"
+      - "${POSTGRES_PUBLISH:-127.0.0.1:5433}:5433"
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimm -d aimm"]
+      test: ["CMD-SHELL", "pg_isready -U aimm -d aimm -p 5433"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -43,9 +49,12 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aimm:aimm@db:5432/aimm}
+      DATABASE_URL: ${DATABASE_URL:-}
       AIMM_DB_AUTOCREATE: "1"
       AIMM_SECRETS_DIR: /run/aimm-secrets
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5433"
       AIMM_API_KEY: ${AIMM_API_KEY:-}
       AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
       LEADPAGE_PROVIDER_KEYS: ${LEADPAGE_PROVIDER_KEYS:-}
@@ -69,4 +78,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  lb_pgdata:
+  lb_pg5433:

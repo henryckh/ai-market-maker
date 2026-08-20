@@ -10,7 +10,7 @@
   │ Agent 2     │────▶│  :8001       │────▶│  :3000       │
   │ (3rd-party) │     │              │     └──────────────┘
   ├─────────────┤     │  PostgreSQL  │
-  │ Agent N     │────▶│  (:5432)     │
+  │ Agent N     │────▶│  (:5433)     │
   └─────────────┘     └──────────────┘
 ```
 
@@ -47,8 +47,8 @@ curl -H "x-api-key: $(cat .secrets/api_key)" http://localhost:8001/leadpage/lead
 | `LEADPAGE_REQUIRE_SIGNED` | `0` | Require HMAC-signed payloads |
 | `LEADPAGE_SIGNED_MAX_SKEW_SEC` | `300` | Max timestamp skew for signed requests |
 | `DATABASE_URL` | auto | PostgreSQL connection string |
-| `POSTGRES_PASSWORD` | `aimm` | DB password (do not publish Postgres on `0.0.0.0`) |
-| `POSTGRES_HOST_PORT` | — | Deprecated; use `POSTGRES_PUBLISH` (default `127.0.0.1:5432`) |
+| `POSTGRES_PASSWORD` | (generated) | DB password (do not publish Postgres on `0.0.0.0`) |
+| `POSTGRES_HOST_PORT` | — | Deprecated; use `POSTGRES_PUBLISH` (default `127.0.0.1:5433`) |
 | `AIMM_CORS_ORIGINS` | (empty) | Allowed CORS origins; empty disables cross-origin browser access |
 
 ### Provider Key Formats

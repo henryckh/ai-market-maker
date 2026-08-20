@@ -1,5 +1,6 @@
 # Copy `.env.example` → `.env` first. Profiles: `with-futu`, `engine`.
-# Empty AIMM_API_KEY / AIMM_AUTH_SECRET → secrets-init writes ./.secrets/
+# Empty AIMM_API_KEY / AIMM_AUTH_SECRET / POSTGRES_PASSWORD → secrets-init writes ./.secrets/
+# Compose Postgres listens on 5433 (volume aimm_pg5433). Not published on the host.
 
 services:
   secrets-init:
@@ -12,6 +13,7 @@ services:
       AIMM_SECRETS_DIR: /run/aimm-secrets
       AIMM_API_KEY: ${AIMM_API_KEY:-}
       AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     volumes:
       - ./.secrets:/run/aimm-secrets
     command: ["python", "-m", "api.control_plane_secrets", "--write"]
@@ -20,13 +22,18 @@ services:
   db:
     image: postgres:16
     environment:
+      PGPORT: "5433"
       POSTGRES_DB: aimm
       POSTGRES_USER: aimm
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aimm}
+      POSTGRES_PASSWORD_FILE: /run/aimm-secrets/postgres_password
     volumes:
-      - aimm_pgdata:/var/lib/postgresql/data
+      - aimm_pg5433:/var/lib/postgresql/data
+      - ./.secrets:/run/aimm-secrets:ro
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimm -d aimm"]
+      test: ["CMD-SHELL", "pg_isready -U aimm -d aimm -p 5433"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -38,10 +45,19 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aimm:aimm@db:5432/aimm}
+      DATABASE_URL: ${DATABASE_URL:-}
+      AIMM_SECRETS_DIR: /run/aimm-secrets
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5433"
     depends_on:
       db:
         condition: service_healthy
+      secrets-init:
+        condition: service_completed_successfully
+    entrypoint: ["/app/docker/api-entrypoint.sh"]
+    volumes:
+      - ./.secrets:/run/aimm-secrets:ro
     command: ["alembic", "upgrade", "head"]
     restart: "no"
 
@@ -52,9 +68,12 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aimm:aimm@db:5432/aimm}
+      DATABASE_URL: ${DATABASE_URL:-}
       AIMM_DB_AUTOCREATE: "0"
       AIMM_SECRETS_DIR: /run/aimm-secrets
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5433"
       AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
       AIMM_API_KEY: ${AIMM_API_KEY:-}
       AIMM_CORS_ORIGINS: ${AIMM_CORS_ORIGINS:-}
@@ -96,7 +115,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aimm:aimm@db:5432/aimm}
+      DATABASE_URL: ${DATABASE_URL:-}
+      AIMM_SECRETS_DIR: /run/aimm-secrets
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5433"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
@@ -112,14 +135,18 @@ services:
       PLATFORM_WORKER_CURSOR: ${PLATFORM_WORKER_CURSOR:-default}
       PLATFORM_SYNC_LOCAL_BACKTESTS: ${PLATFORM_SYNC_LOCAL_BACKTESTS:-0}
       PLATFORM_SYNC_LOCAL_BACKTESTS_EVERY_SEC: ${PLATFORM_SYNC_LOCAL_BACKTESTS_EVERY_SEC:-10}
+    entrypoint: ["/app/docker/api-entrypoint.sh"]
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
     volumes:
       - ./.runs:/app/.runs
       - ./config:/app/config:ro
+      - ./.secrets:/run/aimm-secrets:ro
 
   engine:
     profiles: ["engine"]
@@ -171,4 +198,4 @@ services:
     # When this profile is up, set FUTU_OPEND_HOST=futu-opend in .env.
 
 volumes:
-  aimm_pgdata:
+  aimm_pg5433:
