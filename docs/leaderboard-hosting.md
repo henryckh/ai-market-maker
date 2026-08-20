@@ -26,9 +26,10 @@ export POSTGRES_PASSWORD=$(openssl rand -hex 20)
 # 3. Start the leaderboard stack
 docker compose -f docker-compose.leaderboard.yml up -d
 
-# 4. Verify
+# 4. Verify (health is unauthenticated; other routes need x-api-key from .secrets/api_key)
 curl http://localhost:8001/health
-# → {"status": "ok", "version": "1.0.0"}
+# → {"ok": true, ...}
+curl -H "x-api-key: $(cat .secrets/api_key)" http://localhost:8001/leadpage/leaderboard
 ```
 
 ## Configuration
@@ -37,15 +38,18 @@ curl http://localhost:8001/health
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LEADERBOARD_PORT` | `8001` | API server port |
+| `LEADERBOARD_PORT` | — | Deprecated; use `AIMM_API_PUBLISH` (default `127.0.0.1:8001`) |
 | `LEADERBOARD_WEB_PORT` | `3000` | Web dashboard port |
+| `AIMM_API_KEY` | (generated) | Required control-plane key (`x-api-key`) |
+| `AIMM_AUTH_SECRET` | (generated) | JWT signing secret |
 | `LEADPAGE_PROVIDER_KEYS` | — | Map of provider IDs to shared secrets |
 | `LEADPAGE_REQUIRE_KEYS` | `1` | Reject unauthenticated submissions |
 | `LEADPAGE_REQUIRE_SIGNED` | `0` | Require HMAC-signed payloads |
 | `LEADPAGE_SIGNED_MAX_SKEW_SEC` | `300` | Max timestamp skew for signed requests |
 | `DATABASE_URL` | auto | PostgreSQL connection string |
-| `POSTGRES_PASSWORD` | `aimm` | DB password |
-| `AIMM_CORS_ORIGINS` | `*` | Allowed CORS origins |
+| `POSTGRES_PASSWORD` | `aimm` | DB password (do not publish Postgres on `0.0.0.0`) |
+| `POSTGRES_HOST_PORT` | — | Deprecated; use `POSTGRES_PUBLISH` (default `127.0.0.1:5432`) |
+| `AIMM_CORS_ORIGINS` | (empty) | Allowed CORS origins; empty disables cross-origin browser access |
 
 ### Provider Key Formats
 

@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { NexusSectionHeader } from "@/components/NexusSectionHeader";
+import { dashboardFlowHeaders, getFlowApiOrigin } from "@/lib/flowApiOrigin";
 
 function flowOrigin(): string {
-  const raw = process.env.NEXT_PUBLIC_FLOW_API_BASE_URL?.trim() || "http://127.0.0.1:8001";
-  return raw.replace(/\/$/, "");
+  return getFlowApiOrigin();
 }
 
 type Selftest = {
@@ -93,9 +93,9 @@ export default function ControlCenterPage() {
   function refresh() {
     setError(null);
     Promise.all([
-      fetch(`${base}/capabilities`, { cache: "no-store" }).then((r) => r.json()),
-      fetch(`${base}/ops/selftest`, { cache: "no-store" }).then((r) => r.json()),
-      fetch(`${base}/runtime-settings`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`${base}/capabilities`, { cache: "no-store", headers: dashboardFlowHeaders() }).then((r) => r.json()),
+      fetch(`${base}/ops/selftest`, { cache: "no-store", headers: dashboardFlowHeaders() }).then((r) => r.json()),
+      fetch(`${base}/runtime-settings`, { cache: "no-store", headers: dashboardFlowHeaders() }).then((r) => r.json()),
     ])
       .then(([c, s, r]) => {
         setCaps(c ?? null);
@@ -125,7 +125,7 @@ export default function ControlCenterPage() {
     try {
       const res = await fetch(`${base}/ops/backtests/quick`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: dashboardFlowHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           ticker: btTicker,
           n_bars: Number(btBars),
@@ -154,7 +154,7 @@ export default function ControlCenterPage() {
     try {
       const res = await fetch(`${base}/ops/publish/backtest`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: dashboardFlowHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ run_id: publishRunId, confirm: true }),
       });
       const json = await res.json().catch(() => ({}));
@@ -177,7 +177,10 @@ export default function ControlCenterPage() {
     setReceiptsLoading(true);
     setReceipts(null);
     try {
-      const res = await fetch(`${base}/backtests/${encodeURIComponent(rid)}/iterations?limit=300`, { cache: "no-store" });
+      const res = await fetch(`${base}/backtests/${encodeURIComponent(rid)}/iterations?limit=300`, {
+        cache: "no-store",
+        headers: dashboardFlowHeaders(),
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(json?.detail || json?.error || `Failed to load receipts (${res.status})`);
@@ -196,7 +199,7 @@ export default function ControlCenterPage() {
     try {
       const res = await fetch(`${base}/runtime-settings/harness-memory`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: dashboardFlowHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           harness_memory: {
             recent_views_max: Number(hmViews),

@@ -1,7 +1,22 @@
-# Postgres + API + worker + web. Copy `.env.example` → `.env` first.
-# Optional profiles: `with-futu` (OpenD), `engine` (live loop)
+# Copy `.env.example` → `.env` first. Profiles: `with-futu`, `engine`.
+# Empty AIMM_API_KEY / AIMM_AUTH_SECRET → secrets-init writes ./.secrets/
 
 services:
+  secrets-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      AIMM_SECRETS_DIR: /run/aimm-secrets
+      AIMM_API_KEY: ${AIMM_API_KEY:-}
+      AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
+    volumes:
+      - ./.secrets:/run/aimm-secrets
+    command: ["python", "-m", "api.control_plane_secrets", "--write"]
+    restart: "no"
+
   db:
     image: postgres:16
     environment:
@@ -39,9 +54,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aimm:aimm@db:5432/aimm}
       AIMM_DB_AUTOCREATE: "0"
-      AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-dev-secret-change-me}
+      AIMM_SECRETS_DIR: /run/aimm-secrets
+      AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
       AIMM_API_KEY: ${AIMM_API_KEY:-}
-      AIMM_CORS_ORIGINS: ${AIMM_CORS_ORIGINS:-*}
+      AIMM_CORS_ORIGINS: ${AIMM_CORS_ORIGINS:-}
       # LLM keys duplicated here for compose variable interpolation.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
@@ -55,17 +71,21 @@ services:
       FUTU_OPEND_TRADE_PORT: ${FUTU_OPEND_TRADE_PORT:-11112}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    entrypoint: ["/app/docker/api-entrypoint.sh"]
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
     ports:
-      - "8001:8001"
+      - "${AIMM_API_PUBLISH:-127.0.0.1:8001}:8001"
     volumes:
       - ./.runs:/app/.runs
       - ./config:/app/config:ro
       - ./scripts:/app/scripts:ro
+      - ./.secrets:/run/aimm-secrets:ro
 
   worker:
     build:
@@ -127,13 +147,19 @@ services:
     environment:
       FLOW_API_BASE_URL: http://api:8001
       AIMM_API_KEY: ${AIMM_API_KEY:-}
+      AIMM_SECRETS_DIR: /run/aimm-secrets
       NODE_ENV: production
       FLOW_ALLOW_MOCK_FALLBACK: "0"
       NEXT_PUBLIC_FLOW_ALLOW_MOCK_FALLBACK: "0"
     depends_on:
-      - api
+      secrets-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    volumes:
+      - ./.secrets:/run/aimm-secrets:ro
     ports:
-      - "3000:3000"
+      - "${AIMM_WEB_PUBLISH:-127.0.0.1:3000}:3000"
 
   futu-opend:
     profiles: ["with-futu"]

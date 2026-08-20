@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { flowAuthHeaders } from "../../../../_flowAuth";
+import { flowAuthHeaders } from "@/server/flowProxy";
 
 export async function GET(request: Request, context: { params: Promise<{ provider: string }> }) {
   const { provider } = await context.params;

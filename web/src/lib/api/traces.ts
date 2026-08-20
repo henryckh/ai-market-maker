@@ -33,7 +33,10 @@ export async function fetchNexusPayloadWithSource(
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch(url, {
+        cache: "no-store",
+        headers: url.includes("/api/flow") ? { "x-aimm-dashboard": "1" } : undefined,
+      });
       if (res.ok) {
         const dataSource = res.headers.get("x-flow-data-source");
         const payload = (await res.json()) as NexusPayload;

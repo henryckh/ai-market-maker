@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { flowAuthHeaders } from "@/server/flowProxy";
 import { getPlatformAuthHeader } from "../_session";
 
 export async function GET() {
   const flowApiBase = process.env.FLOW_API_BASE_URL ?? "http://127.0.0.1:8001";
-  const headers = { ...(await getPlatformAuthHeader()) };
+  const headers = { ...flowAuthHeaders(), ...(await getPlatformAuthHeader()) };
   const res = await fetch(`${flowApiBase}/admin/providers`, {
     cache: "no-store",
     headers,
@@ -15,7 +16,11 @@ export async function GET() {
 export async function POST(request: Request) {
   const flowApiBase = process.env.FLOW_API_BASE_URL ?? "http://127.0.0.1:8001";
   const body = await request.json().catch(() => ({}));
-  const headers = { "content-type": "application/json", ...(await getPlatformAuthHeader()) };
+  const headers = {
+    "content-type": "application/json",
+    ...flowAuthHeaders(),
+    ...(await getPlatformAuthHeader()),
+  };
   const res = await fetch(`${flowApiBase}/admin/providers`, {
     method: "POST",
     headers,

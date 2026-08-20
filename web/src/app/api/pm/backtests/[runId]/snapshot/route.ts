@@ -1,5 +1,4 @@
-import { flowAuthHeaders } from "../../../../_flowAuth";
-import { flowApiBase, proxyJson } from "@/server/flowProxy";
+import { flowAuthHeaders, flowApiBase, proxyJson } from "@/server/flowProxy";
 import { NextRequest } from "next/server";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ runId: string }> }) {

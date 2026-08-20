@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getFlowApiOrigin } from "@/lib/flowApiOrigin";
+import { dashboardFlowHeaders, getFlowApiOrigin } from "@/lib/flowApiOrigin";
 import { useNowSec } from "@/hooks/useNowSec";
 import {
   formatCountdown,
@@ -84,7 +84,10 @@ export function LivePaperControls({
 
   const refreshBook = useCallback(async () => {
     try {
-      const res = await fetch(`${getFlowApiOrigin()}/engine/paper/book`, { cache: "no-store" });
+      const res = await fetch(`${getFlowApiOrigin()}/engine/paper/book`, {
+        cache: "no-store",
+        headers: dashboardFlowHeaders(),
+      });
       if (!res.ok) return;
       setBook((await res.json()) as PaperBook);
     } catch {
@@ -94,7 +97,10 @@ export function LivePaperControls({
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`${getFlowApiOrigin()}/engine/paper/status`, { cache: "no-store" });
+      const res = await fetch(`${getFlowApiOrigin()}/engine/paper/status`, {
+        cache: "no-store",
+        headers: dashboardFlowHeaders(),
+      });
       const data = (await res.json().catch(() => ({}))) as PaperStatus;
       if (!res.ok) {
         setErr(typeof data.detail === "string" ? data.detail : "Status failed");
@@ -142,7 +148,7 @@ export function LivePaperControls({
     try {
       const res = await fetch(`${getFlowApiOrigin()}/engine/paper/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: dashboardFlowHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ ticker, interval_sec: intervalSec }),
       });
       const data = (await res.json().catch(() => ({}))) as PaperStatus;
@@ -170,7 +176,10 @@ export function LivePaperControls({
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch(`${getFlowApiOrigin()}/engine/paper/stop`, { method: "POST" });
+      const res = await fetch(`${getFlowApiOrigin()}/engine/paper/stop`, {
+        method: "POST",
+        headers: dashboardFlowHeaders(),
+      });
       const data = (await res.json().catch(() => ({}))) as PaperStatus;
       if (!res.ok) {
         setErr(data.detail || "Stop failed");

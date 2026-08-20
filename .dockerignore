@@ -15,6 +15,7 @@ dist/
 
 # Runtime artifacts
 .runs/
+.secrets/
 
 # Frontend (when building API/worker with context: .)
 web/node_modules/

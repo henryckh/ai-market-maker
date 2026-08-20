@@ -1,5 +1,4 @@
-import { flowAuthHeaders } from "../../../../_flowAuth";
-import { flowApiBase, proxyJson } from "@/server/flowProxy";
+import { flowAuthHeaders, flowApiBase, proxyJson } from "@/server/flowProxy";
 
 export async function GET(_request: Request, context: { params: Promise<{ provider: string }> }) {
   const { provider } = await context.params;

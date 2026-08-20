@@ -25,7 +25,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from api.control_plane_secrets import presented_matches
 from api.leadpage_validation import validate_result
+from api.safe_ids import path_under, require_safe_id
 from api.wallet_auth import (
     generate_provider_key,
     make_challenge,
@@ -255,7 +257,7 @@ def _auth_provider_or_401(request: Request, provider: str) -> None:
     if not expected:
         raise HTTPException(status_code=401, detail=f"unknown provider: {provider}")
     presented = _presented_provider_key(request)
-    if presented != expected:
+    if not presented_matches(presented, expected):
         raise HTTPException(
             status_code=401,
             detail="unauthorized (set x-leadpage-provider-key or x-api-key)",
@@ -428,7 +430,11 @@ def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
 
 
 def _load_local_summary(run_id: str) -> dict[str, Any] | None:
-    p = BACKTESTS_DIR / run_id / "summary.json"
+    try:
+        rid = require_safe_id(run_id, name="run_id")
+        p = path_under(BACKTESTS_DIR, rid, "summary.json")
+    except HTTPException:
+        return None
     if not p.is_file():
         return None
     try:

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { flowAuthHeaders } from "../../_flowAuth";
+import { flowAuthHeaders } from "@/server/flowProxy";
 
 function flowBase(): string {
   return process.env.FLOW_API_BASE_URL ?? "http://127.0.0.1:8001";

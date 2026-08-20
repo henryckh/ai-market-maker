@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import mockTraces from "@/data/mock-traces.json";
-import { flowApiBase } from "@/server/flowProxy";
-import { flowAuthHeaders } from "../_flowAuth";
+import { flowApiBase, flowAuthHeaders } from "@/server/flowProxy";
 
 /** Live Flow by default. Set USE_MOCK=1 or NEXT_PUBLIC_USE_MOCK=1 to serve bundled demo JSON from /api/traces. */
 function useMockTraces(): boolean {

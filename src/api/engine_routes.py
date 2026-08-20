@@ -26,7 +26,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class PaperStartRequest(BaseModel):
-    ticker: str = Field("BTC/USDT", min_length=3, max_length=64)
+    ticker: str = Field(
+        "BTC/USDT", min_length=3, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9/._-]{1,62}$"
+    )
     interval_sec: int = Field(900, ge=300, le=3600)
 
 

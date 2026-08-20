@@ -46,6 +46,8 @@ data/news_sentiment/raw/
 # Local output
 out/
 
+.secrets/
+
 # experimental configs
 config/experiments/
 config/grid/
