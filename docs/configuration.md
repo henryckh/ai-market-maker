@@ -24,6 +24,15 @@ config/policy.default.json  → trading policy (risk, sizing, rules)
 | `BINANCE_API_KEY`   | Binance API key for market data               |
 | `BINANCE_API_SECRET`| Binance API secret                            |
 | `NEXUS_API_KEY`     | Olaxbt Nexus data API key                     |
+| `AIMM_API_KEY`      | Flow control-plane API key (`x-api-key`)      |
+| `AIMM_AUTH_SECRET`  | JWT signing secret for `/auth/*`              |
+| `POSTGRES_PASSWORD` | Compose Postgres password                     |
+
+`AIMM_API_KEY`, `AIMM_AUTH_SECRET`, and `POSTGRES_PASSWORD` have **no shipped default**.
+Compose Postgres listens on **5433** (not 5432). If you set your own values in `.env`, those are used on every boot. Leave them empty
+and run `python -m api.control_plane_secrets --write` (or `docker compose up`): unique
+values are written to `.secrets/` (gitignored) once and reused. All Flow HTTP
+routes except `GET /health` require `x-api-key`.
 
 Atlas Cloud can be selected without replacing the existing OpenAI variables:
 

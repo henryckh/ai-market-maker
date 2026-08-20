@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { flowApiBase } from "@/server/flowProxy";
-import { flowAuthHeaders } from "@/app/api/_flowAuth";
+import { flowApiBase, flowAuthHeaders } from "@/server/flowProxy";
 
 /**
  * POST /api/futu/place-order

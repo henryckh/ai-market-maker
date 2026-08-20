@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { flowAuthHeaders } from "../../_flowAuth";
+import { flowAuthHeaders } from "@/server/flowProxy";
 
 /** Proxy to Flow API: POST /backtests/preset (named Quant strategy preset). */
 export async function POST(req: Request) {

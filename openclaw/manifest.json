@@ -25,7 +25,7 @@
       "transport": "http",
       "method": "GET",
       "path": "/health",
-      "auth": "optional_x_api_key"
+      "auth": "required_x_api_key"
     },
     {
       "name": "flow.latest_run",
@@ -34,7 +34,7 @@
       "transport": "http",
       "method": "GET",
       "path": "/runs/latest",
-      "auth": "optional_x_api_key"
+      "auth": "required_x_api_key"
     },
     {
       "name": "flow.get_payload",
@@ -43,7 +43,7 @@
       "transport": "http",
       "method": "GET",
       "path": "/runs/{run_id}/payload",
-      "auth": "optional_x_api_key"
+      "auth": "required_x_api_key"
     },
     {
       "name": "flow.get_events",
@@ -52,7 +52,7 @@
       "transport": "http",
       "method": "GET",
       "path": "/runs/{run_id}/events",
-      "auth": "optional_x_api_key"
+      "auth": "required_x_api_key"
     },
     {
       "name": "pm.get_portfolio_health",
@@ -61,7 +61,7 @@
       "transport": "http",
       "method": "GET",
       "path": "/pm/portfolio-health",
-      "auth": "optional_x_api_key"
+      "auth": "required_x_api_key"
     },
     {
       "name": "backtest.list_runs",
@@ -70,7 +70,7 @@
       "transport": "http",
       "method": "GET",
       "path": "/backtests",
-      "auth": "optional_x_api_key"
+      "auth": "required_x_api_key"
     }
   ],
   "agents": {

@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
-import { flowApiBase } from "@/server/flowProxy";
-import { flowAuthHeaders } from "@/app/api/_flowAuth";
+import { flowApiBase, flowAuthHeaders } from "@/server/flowProxy";
 
 /**
  * GET /api/futu/price?symbol=HK.00700&interval=1d&limit=200
- *
- * Proxies to Flow `/futu/price` (Futu OpenD). Forwards HTTP errors instead of hiding them
- * behind synthetic bars. Sends `x-api-key` when `AIMM_API_KEY` is set (Flow may require it
- * for non-loopback clients, e.g. Next on host → Flow in Docker).
+ * Proxies Flow `/futu/price`; forwards upstream errors instead of fake bars.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -32,7 +28,7 @@ export async function GET(request: Request) {
 
     const hint401 =
       flowRes.status === 401
-        ? "Flow has AIMM_API_KEY set; add the same AIMM_API_KEY to web/.env.local (or unset AIMM_API_KEY on the Flow process for local-only dev)."
+        ? "Flow rejected the request. Check AIMM_API_KEY on the API."
         : undefined;
 
     return NextResponse.json(

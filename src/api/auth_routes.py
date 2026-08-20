@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -14,16 +15,30 @@ from storage.leadpage_db import create_user, get_user_by_email, get_user_by_id
 router = APIRouter(tags=["auth"])
 
 _PWD = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_AUTH_HITS: dict[tuple[str, str], list[float]] = defaultdict(list)
+
+
+def _rate_limit(request: Request, *, bucket: str, limit: int = 20, window_sec: int = 60) -> None:
+    host = getattr(getattr(request, "client", None), "host", None) or "unknown"
+    now = time.time()
+    key = (bucket, host)
+    recent = [t for t in _AUTH_HITS[key] if now - t < window_sec]
+    if len(recent) >= limit:
+        _AUTH_HITS[key] = recent
+        raise HTTPException(status_code=429, detail="too many attempts")
+    recent.append(now)
+    _AUTH_HITS[key] = recent
 
 
 def _jwt_secret() -> str:
+    from api.control_plane_secrets import is_usable_secret
+
     sec = (os.getenv("AIMM_AUTH_SECRET") or "").strip()
-    if not sec:
-        env = (os.getenv("AIMM_ENV") or os.getenv("ENV") or "").strip().lower()
-        if env in {"prod", "production"}:
-            raise RuntimeError("AIMM_AUTH_SECRET is required in production")
-        # Dev fallback; for production set AIMM_AUTH_SECRET.
-        sec = "dev-secret-change-me"
+    if not is_usable_secret(sec):
+        raise RuntimeError(
+            "AIMM_AUTH_SECRET is not set. "
+            "Run python -m api.control_plane_secrets --write or set AIMM_AUTH_SECRET."
+        )
     return sec
 
 
@@ -82,7 +97,8 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/auth/register")
-def register(req: RegisterRequest) -> dict[str, Any]:
+def register(request: Request, req: RegisterRequest) -> dict[str, Any]:
+    _rate_limit(request, bucket="register", limit=10, window_sec=60)
     email = req.email.strip().lower()
     if "@" not in email:
         raise HTTPException(status_code=400, detail="invalid email")
@@ -94,7 +110,8 @@ def register(req: RegisterRequest) -> dict[str, Any]:
 
 
 @router.post("/auth/login")
-def login(req: LoginRequest) -> dict[str, Any]:
+def login(request: Request, req: LoginRequest) -> dict[str, Any]:
+    _rate_limit(request, bucket="login", limit=20, window_sec=60)
     email = req.email.strip().lower()
     u = get_user_by_email(email)
     if u is None or not _PWD.verify(req.password, u.password_hash):

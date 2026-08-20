@@ -1,18 +1,38 @@
-# Leaderboard API stack (DB + Flow API). No separate UI tree — use the main Next `web/` via
-# `docker compose up` when you want a portal, or hit the API directly.
+# Leaderboard API (DB + Flow). Dashboard is the main `web/` compose file.
 services:
+  secrets-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      AIMM_SECRETS_DIR: /run/aimm-secrets
+      AIMM_API_KEY: ${AIMM_API_KEY:-}
+      AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - ./.secrets:/run/aimm-secrets
+    command: ["python", "-m", "api.control_plane_secrets", "--write"]
+    restart: "no"
+
   db:
     image: postgres:16-alpine
     environment:
+      PGPORT: "5433"
       POSTGRES_DB: aimm
       POSTGRES_USER: aimm
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aimm}
+      POSTGRES_PASSWORD_FILE: /run/aimm-secrets/postgres_password
     volumes:
-      - lb_pgdata:/var/lib/postgresql/data
+      - lb_pg5433:/var/lib/postgresql/data
+      - ./.secrets:/run/aimm-secrets:ro
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "${POSTGRES_PUBLISH:-127.0.0.1:5433}:5433"
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aimm -d aimm"]
+      test: ["CMD-SHELL", "pg_isready -U aimm -d aimm -p 5433"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -29,23 +49,33 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aimm:aimm@db:5432/aimm}
+      DATABASE_URL: ${DATABASE_URL:-}
       AIMM_DB_AUTOCREATE: "1"
+      AIMM_SECRETS_DIR: /run/aimm-secrets
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5433"
+      AIMM_API_KEY: ${AIMM_API_KEY:-}
+      AIMM_AUTH_SECRET: ${AIMM_AUTH_SECRET:-}
       LEADPAGE_PROVIDER_KEYS: ${LEADPAGE_PROVIDER_KEYS:-}
       LEADPAGE_REQUIRE_KEYS: ${LEADPAGE_REQUIRE_KEYS:-1}
       LEADPAGE_REQUIRE_SIGNED: ${LEADPAGE_REQUIRE_SIGNED:-0}
-      AIMM_CORS_ORIGINS: ${AIMM_CORS_ORIGINS:-*}
+      AIMM_CORS_ORIGINS: ${AIMM_CORS_ORIGINS:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
     depends_on:
       db:
         condition: service_healthy
+      secrets-init:
+        condition: service_completed_successfully
+    entrypoint: ["/app/docker/api-entrypoint.sh"]
     ports:
-      - "${LEADERBOARD_PORT:-8001}:8001"
+      - "${AIMM_API_PUBLISH:-127.0.0.1:8001}:8001"
     volumes:
       - ./.runs:/app/.runs
+      - ./.secrets:/run/aimm-secrets:ro
     restart: unless-stopped
 
 volumes:
-  lb_pgdata:
+  lb_pg5433:

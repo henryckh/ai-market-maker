@@ -16,11 +16,6 @@ if str(src_dir) not in sys.path:
 os.environ.setdefault("AIMM_DESK_STRATEGY_PRESET", "default")
 os.environ.setdefault("STRATEGY_INTERVAL_SEC", "180")
 
-# Check for Nexus API key - use demo key if not set
-if not os.getenv("NEXUS_API_KEY"):
-    os.environ["NEXUS_API_KEY"] = "4Qbp6biPAKPS1gOksAySOlqK"
-    print("⚠️  Using demo Nexus API key (rate-limited)")
-
 # Export main components for easier imports
 __all__ = ["agents", "backtest", "config", "tools", "workflow", "main"]
 

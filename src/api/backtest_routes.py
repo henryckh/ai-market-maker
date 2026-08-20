@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.safe_ids import path_under, require_safe_id
 from backtest.bars import (
     align_bars_by_min_length,
     fetch_ccxt_ohlcv_bars,
@@ -64,8 +65,13 @@ def _job_stale_sec() -> int:
     return max(60, int(os.environ.get("BACKTEST_JOB_STALE_SEC", "240")))
 
 
+def _run_dir(run_id: str) -> Path:
+    rid = require_safe_id(str(run_id), name="run_id")
+    return path_under(BACKTESTS_DIR, rid)
+
+
 def _job_path(run_id: str) -> Path:
-    return BACKTESTS_DIR / str(run_id) / "job.json"
+    return _run_dir(run_id) / "job.json"
 
 
 def _write_job(run_id: str, payload: dict[str, Any]) -> None:
@@ -1075,13 +1081,13 @@ def post_backtest_from_file(req: FileBacktestRequest) -> dict[str, Any]:
 
 @router.get("/backtests/{run_id}/summary")
 def get_backtest_summary(run_id: str) -> dict[str, Any]:
-    summary_path = BACKTESTS_DIR / run_id / "summary.json"
+    summary_path = _run_dir(run_id) / "summary.json"
     if not summary_path.is_file():
         raise HTTPException(status_code=404, detail="Unknown backtest run_id")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     # Backfill start/end time for older runs (added later in engine).
     if isinstance(summary, dict) and ("start_ts" not in summary or "end_ts" not in summary):
-        equity_path = BACKTESTS_DIR / run_id / "equity.jsonl"
+        equity_path = _run_dir(run_id) / "equity.jsonl"
         if equity_path.is_file():
             try:
                 lines = equity_path.read_text(encoding="utf-8").splitlines()
@@ -1119,7 +1125,7 @@ def get_backtest_export_manifest(run_id: str) -> dict[str, Any]:
     Contains schema version, file listing, and metrics summary.
     Returns 404 if the export bundle was not generated.
     """
-    manifest_path = BACKTESTS_DIR / run_id / "export_manifest.json"
+    manifest_path = _run_dir(run_id) / "export_manifest.json"
     if not manifest_path.is_file():
         raise HTTPException(
             status_code=404,
@@ -1137,7 +1143,7 @@ def get_backtest_equity(
     max_points: int = Query(2000, ge=10, le=50_000),
 ) -> dict[str, Any]:
     """Return equity curve points for charting (downsampled for large runs)."""
-    equity_path = BACKTESTS_DIR / run_id / "equity.jsonl"
+    equity_path = _run_dir(run_id) / "equity.jsonl"
     if not equity_path.is_file():
         raise HTTPException(
             status_code=404, detail="Unknown backtest run_id or missing equity.jsonl"
@@ -1145,7 +1151,7 @@ def get_backtest_equity(
     rows = _read_jsonl_all(equity_path)
     # Older runs wrote warmup bars into equity.jsonl; drop them so charts match
     # the scored From→To window (same as buy&hold / bars.json).
-    summary_path = BACKTESTS_DIR / run_id / "summary.json"
+    summary_path = _run_dir(run_id) / "summary.json"
     if summary_path.is_file():
         try:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -1184,7 +1190,7 @@ def get_backtest_trades(
     limit: int = Query(2000, ge=1, le=50_000),
 ) -> dict[str, Any]:
     """Return booked trades from ``trades.jsonl`` (newest last; capped by ``limit``)."""
-    trades_path = BACKTESTS_DIR / run_id / "trades.jsonl"
+    trades_path = _run_dir(run_id) / "trades.jsonl"
     if not trades_path.is_file():
         raise HTTPException(
             status_code=404, detail="Unknown backtest run_id or missing trades.jsonl"
@@ -1210,7 +1216,7 @@ def get_backtest_iterations(
 ) -> dict[str, Any]:
     """Return per-bar iteration receipts from ``iterations.jsonl`` (capped)."""
 
-    iterations_path = BACKTESTS_DIR / run_id / "iterations.jsonl"
+    iterations_path = _run_dir(run_id) / "iterations.jsonl"
     if not iterations_path.is_file():
         raise HTTPException(
             status_code=404, detail="Unknown backtest run_id or missing iterations.jsonl"
@@ -1229,7 +1235,7 @@ def get_backtest_bars(
     max_points: int = Query(2000, ge=10, le=50_000),
 ) -> dict[str, Any]:
     """Return OHLCV bars used for the run (primary ticker), downsampled for charting."""
-    bars_path = BACKTESTS_DIR / run_id / "bars.json"
+    bars_path = _run_dir(run_id) / "bars.json"
     if not bars_path.is_file():
         raise HTTPException(status_code=404, detail="Unknown backtest run_id or missing bars.json")
     raw = json.loads(bars_path.read_text(encoding="utf-8"))
@@ -1256,7 +1262,7 @@ def get_backtest_bars(
 
     # Synthesize buy&hold from closes when summary has no benchmark path
     if not benchmark_equity and full_norm:
-        summary_path = BACKTESTS_DIR / run_id / "summary.json"
+        summary_path = _run_dir(run_id) / "summary.json"
         initial = 10_000.0
         if summary_path.is_file():
             try:

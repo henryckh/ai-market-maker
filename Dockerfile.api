@@ -16,8 +16,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY src /app/src
 COPY config /app/config
 COPY scripts /app/scripts
+COPY docker /app/docker
 COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
+
+RUN chmod +x /app/docker/api-entrypoint.sh
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps -e .

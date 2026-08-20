@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from adapters.nexus_adapter import get_nexus_adapter
 from api.payload_adapter import build_nexus_payload
+from api.safe_ids import path_under, require_safe_id
 from backtest.exchange_trade_format import (
     trade_row_fee_usd,
     trade_row_side,
@@ -99,7 +100,7 @@ def _extract_first_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _resolve_backtest_dir(run_id: str) -> Path:
-    rid = (run_id or "").strip()
+    rid = require_safe_id((run_id or "").strip(), name="run_id")
     if rid == "latest":
         # Prefer newest *completed* bt-* (must have summary.json). Orphaned
         # mid-run folders get fresh mtimes when job.json is updated on restart.
@@ -114,24 +115,28 @@ def _resolve_backtest_dir(run_id: str) -> Path:
                 reverse=True,
             )
             if candidates:
-                rid = candidates[0].name
+                rid = require_safe_id(candidates[0].name, name="run_id")
         if rid == "latest" and LATEST_RUN_FILE.exists():
-            latest = LATEST_RUN_FILE.read_text().strip()
-            if latest.startswith("bt") and (BACKTESTS_DIR / latest / "summary.json").is_file():
-                rid = latest
-    d = BACKTESTS_DIR / rid
+            latest_raw = LATEST_RUN_FILE.read_text().strip()
+            if (
+                latest_raw
+                and latest_raw.startswith("bt")
+                and (BACKTESTS_DIR / latest_raw / "summary.json").is_file()
+            ):
+                rid = require_safe_id(latest_raw, name="run_id")
+    d = path_under(BACKTESTS_DIR, rid)
     if not d.exists():
         raise HTTPException(status_code=404, detail=f"run not found: {rid}")
     return d
 
 
 def _resolve_run_log(run_id: str) -> Path:
-    rid = run_id
+    rid = require_safe_id(run_id, name="run_id")
     if rid == "latest" and LATEST_RUN_FILE.exists():
-        latest = LATEST_RUN_FILE.read_text().strip()
-        if latest:
-            rid = latest
-    return RUNS_DIR / f"{rid}.events.jsonl"
+        latest_raw = LATEST_RUN_FILE.read_text().strip()
+        if latest_raw:
+            rid = require_safe_id(latest_raw, name="run_id")
+    return path_under(RUNS_DIR, f"{rid}.events.jsonl")
 
 
 def _is_stable_pair(sym: str) -> bool:

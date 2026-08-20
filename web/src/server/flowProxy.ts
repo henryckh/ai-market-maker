@@ -8,19 +8,17 @@ type ProxyOptions = {
   fallbackJson?: Record<string, unknown>;
 };
 
-/**
- * Base URL for Next.js **server** routes when proxying to Flow (FastAPI).
- *
- * Prefer `FLOW_API_BASE_URL` (e.g. `http://api:8001` in Docker). If unset, use
- * `NEXT_PUBLIC_FLOW_API_BASE_URL` so local `npm run dev` works when only the public
- * var is set in `web/.env.local`.
- */
 export function flowApiBase(): string {
   const raw =
     process.env.FLOW_API_BASE_URL?.trim() ||
     process.env.NEXT_PUBLIC_FLOW_API_BASE_URL?.trim() ||
     "http://127.0.0.1:8001";
   return raw.replace(/\/$/, "");
+}
+
+export function flowAuthHeaders(): Record<string, string> {
+  const key = (process.env["AIMM_API_KEY"] ?? "").trim();
+  return key ? { "x-api-key": key } : {};
 }
 
 export function proxyUnreachable(fallbackJson: Record<string, unknown>) {
@@ -34,7 +32,7 @@ export async function proxyJson(targetUrl: string, opts: ProxyOptions = {}) {
   try {
     const res = await fetch(targetUrl, {
       method: opts.method,
-      headers: opts.headers,
+      headers: { ...flowAuthHeaders(), ...opts.headers },
       body: opts.body,
       cache: opts.cache ?? "no-store",
     });

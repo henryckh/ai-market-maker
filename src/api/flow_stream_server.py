@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
@@ -24,6 +24,12 @@ from .backtest_routes import recover_stale_backtest_jobs
 from .backtest_routes import router as backtest_router
 from .capabilities_routes import router as capabilities_router
 from .config_designer_routes import router as config_designer_router
+from .control_plane_secrets import (
+    ensure_control_plane_secrets,
+    ensure_postgres_password,
+    is_usable_secret,
+    presented_matches,
+)
 from .copy_routes import router as copy_router
 from .deploy_routes import router as deploy_router
 from .engine_routes import router as engine_router
@@ -37,6 +43,7 @@ from .profile_routes import router as profile_router
 from .provider_admin_routes import router as provider_admin_router
 from .public_provider_routes import router as public_provider_router
 from .runtime_settings_routes import router as runtime_settings_router
+from .safe_ids import path_under, require_safe_id
 from .schema_validation import validate_nexus_payload
 from .signal_routes import router as signal_router
 from .studio_routes import router as studio_router
@@ -59,6 +66,8 @@ DEFAULT_TAIL_MESSAGE_LOG = int((os.getenv("AIMM_UI_TAIL_MESSAGES") or "600").str
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    ensure_control_plane_secrets(generate=True)
+    ensure_postgres_password(generate=True)
     # Daemon backtest threads die on restart; flip orphaned job.json out of "running".
     try:
         recover_stale_backtest_jobs(reason="api_startup")
@@ -67,65 +76,95 @@ async def _lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Market Maker Flow Stream", version="0.1.0", lifespan=_lifespan)
+_enable_docs = (os.getenv("AIMM_ENABLE_DOCS") or "").strip().lower() in {"1", "true", "yes", "on"}
+app = FastAPI(
+    title="AI Market Maker Flow Stream",
+    version="0.1.0",
+    lifespan=_lifespan,
+    docs_url="/docs" if _enable_docs else None,
+    redoc_url="/redoc" if _enable_docs else None,
+    openapi_url="/openapi.json" if _enable_docs else None,
+)
 
 
 def _expected_api_key() -> str | None:
     v = (os.getenv("AIMM_API_KEY") or "").strip()
-    return v or None
+    return v if is_usable_secret(v) else None
 
 
 def _extract_presented_key(request: Request) -> str | None:
-    # Prefer explicit X-API-Key; allow Authorization: Bearer for common gateways.
+    # Bearer is also used for user JWTs, so only accept it when it is the API key.
     x = (request.headers.get("x-api-key") or "").strip()
     if x:
         return x
     auth = (request.headers.get("authorization") or "").strip()
     if auth.lower().startswith("bearer "):
         token = auth.split(" ", 1)[1].strip()
-        return token or None
+        expected = _expected_api_key()
+        if token and expected and presented_matches(token, expected):
+            return token
     return None
+
+
+def _is_public_http_path(path: str) -> bool:
+    return path == "/health"
+
+
+def _with_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
+    if _is_public_http_path(request.url.path):
+        return _with_security_headers(await call_next(request))
+
     expected = _expected_api_key()
     if expected is None:
-        return await call_next(request)
-
-    # Always allow unauthenticated health checks.
-    if request.url.path == "/health":
-        return await call_next(request)
-
-    # Allow same-host calls (e.g. Next.js proxy running on the same machine/container).
-    # This keeps the web UI functional without leaking the key to browsers.
-    client_host = getattr(getattr(request, "client", None), "host", None)
-    if client_host in {"127.0.0.1", "::1"}:
-        return await call_next(request)
-
-    presented = _extract_presented_key(request)
-    if presented != expected:
-        return JSONResponse(
-            {"error": "unauthorized", "hint": "Set x-api-key (or Authorization: Bearer)"},
-            status_code=HTTP_401_UNAUTHORIZED,
+        return _with_security_headers(
+            JSONResponse(
+                {
+                    "error": "api_key_not_configured",
+                    "hint": "Set AIMM_API_KEY or run python -m api.control_plane_secrets --write",
+                },
+                status_code=503,
+            )
         )
 
-    return await call_next(request)
+    presented = _extract_presented_key(request)
+    if not presented_matches(presented, expected):
+        return _with_security_headers(
+            JSONResponse(
+                {
+                    "error": "unauthorized",
+                    "hint": "Set x-api-key (or Authorization: Bearer with the API key)",
+                },
+                status_code=HTTP_401_UNAUTHORIZED,
+            )
+        )
+
+    return _with_security_headers(await call_next(request))
 
 
-_cors_origins_raw = (os.getenv("AIMM_CORS_ORIGINS") or "*").strip()
+_cors_origins_raw = (os.getenv("AIMM_CORS_ORIGINS") or "").strip()
 _cors_allow_origins = (
     ["*"]
     if _cors_origins_raw == "*"
     else [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
 )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_allow_origins or ["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if _cors_allow_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_allow_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "x-api-key", "x-aimm-dashboard"],
+    )
 app.include_router(backtest_router)
 app.include_router(agent_prompt_router)
 app.include_router(runtime_settings_router)
@@ -155,23 +194,30 @@ def _resolve_run_log(run_id: str) -> Path:
 
         resolved = resolve_alias(run_id)
         if resolved:
-            return RUNS_DIR / f"{resolved}.events.jsonl"
+            rid = require_safe_id(resolved, name="run_id")
+            return path_under(RUNS_DIR, f"{rid}.events.jsonl")
+    except HTTPException:
+        raise
     except Exception:
         pass
-    rid = (run_id or "").strip()
+    rid = require_safe_id((run_id or "").strip(), name="run_id")
     if rid == "latest" and LATEST_RUN_FILE.exists():
-        latest = LATEST_RUN_FILE.read_text().strip()
-        if latest and not latest.lower().startswith("bt"):
-            return RUNS_DIR / f"{latest}.events.jsonl"
+        latest_raw = LATEST_RUN_FILE.read_text().strip()
+        if latest_raw:
+            latest = require_safe_id(latest_raw, name="run_id")
+            if latest and not latest.lower().startswith("bt"):
+                return path_under(RUNS_DIR, f"{latest}.events.jsonl")
     if rid in ("latest-paper", "latest_paper", "paper") and LATEST_PAPER_FILE.exists():
-        latest = LATEST_PAPER_FILE.read_text().strip()
-        if latest:
-            return RUNS_DIR / f"{latest}.events.jsonl"
+        latest_raw = LATEST_PAPER_FILE.read_text().strip()
+        if latest_raw:
+            latest = require_safe_id(latest_raw, name="run_id")
+            return path_under(RUNS_DIR, f"{latest}.events.jsonl")
     if rid in ("latest-backtest", "latest_backtest", "backtest") and LATEST_BACKTEST_FILE.exists():
-        latest = LATEST_BACKTEST_FILE.read_text().strip()
-        if latest:
-            return RUNS_DIR / f"{latest}.events.jsonl"
-    return RUNS_DIR / f"{rid}.events.jsonl"
+        latest_raw = LATEST_BACKTEST_FILE.read_text().strip()
+        if latest_raw:
+            latest = require_safe_id(latest_raw, name="run_id")
+            return path_under(RUNS_DIR, f"{latest}.events.jsonl")
+    return path_under(RUNS_DIR, f"{rid}.events.jsonl")
 
 
 @app.get("/health")
@@ -294,24 +340,18 @@ def run_payload(
 @app.websocket("/ws/runs/{run_id}")
 async def ws_run_payload(websocket: WebSocket, run_id: str) -> None:
     expected = _expected_api_key()
-    if expected is not None:
-        client_host = getattr(getattr(websocket, "client", None), "host", None)
-        if client_host in {"127.0.0.1", "::1"}:
-            await websocket.accept()
-        else:
-            presented = (websocket.headers.get("x-api-key") or "").strip()
-            if not presented:
-                auth = (websocket.headers.get("authorization") or "").strip()
-                if auth.lower().startswith("bearer "):
-                    presented = auth.split(" ", 1)[1].strip()
-            if not presented:
-                presented = (websocket.query_params.get("api_key") or "").strip()
-            if presented != expected:
-                await websocket.close(code=1008)
-                return
-            await websocket.accept()
-    else:
-        await websocket.accept()
+    if expected is None:
+        await websocket.close(code=1011)
+        return
+    presented = (websocket.headers.get("x-api-key") or "").strip()
+    if not presented:
+        auth = (websocket.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            presented = auth.split(" ", 1)[1].strip()
+    if not presented_matches(presented, expected):
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
     try:
         while True:
             log_path = _resolve_run_log(run_id)

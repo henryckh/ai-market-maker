@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { flowApiBase } from "@/server/flowProxy";
+import { flowAuthHeaders, flowApiBase } from "@/server/flowProxy";
 
 /**
  * GET /api/studio/price?symbol=BTC/USDT&interval=1h&limit=200
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const flowBase = flowApiBase();
     const flowRes = await fetch(
       `${flowBase}/studio/price?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`,
-      { cache: "no-store", signal: AbortSignal.timeout(3000) },
+      { cache: "no-store", signal: AbortSignal.timeout(3000), headers: { ...flowAuthHeaders() } },
     );
     if (flowRes.ok) {
       const data = await flowRes.json();

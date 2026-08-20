@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { flowAuthHeaders } from "@/server/flowProxy";
 import { setPlatformToken } from "../_session";
 
 export async function POST(request: Request) {
@@ -6,7 +7,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const res = await fetch(`${flowApiBase}/auth/register`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...flowAuthHeaders() },
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));

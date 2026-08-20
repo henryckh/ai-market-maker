@@ -112,6 +112,7 @@ uv run pre-commit install
 # 5. Set up environment
 cp .env.example .env
 # Edit .env — set OPENAI_API_KEY or ATLASCLOUD_API_KEY (required for LLM calls)
+# AIMM_API_KEY / AIMM_AUTH_SECRET / POSTGRES_PASSWORD: leave empty to generate, or set your own
 # Strategy (desks, weights, LLM overlays) lives in config/deploy.active.json
 
 # 6. Run the platform stack: DB + migrate + API + worker + web
@@ -125,9 +126,11 @@ docker compose up --build -d
 # http://localhost:3000/get-started
 ```
 
-Open http://localhost:3000 to view the dashboard.
+Open http://127.0.0.1:3000 to view the dashboard (bound to localhost by default).
 
 Migrations run automatically on first `docker compose up` (service `migrate`).
+Compose Postgres listens on **5433** (new volume; old `5432` data is left untouched).
+If `AIMM_API_KEY` / `AIMM_AUTH_SECRET` / `POSTGRES_PASSWORD` are set in `.env`, those values are used. If you left them empty, first boot writes unique values into `.secrets/` (gitignored) and reuses them. Direct calls to `:8001` need `x-api-key`; the dashboard proxies through Next.js with that key.
 First boot may show an empty Leaderboard until you run a backtest (Nexus → **Research**) or publish results.
 
 For CLI-only trading mode:

@@ -25,9 +25,11 @@ def test_futu_price_endpoint_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(futu_mod, "FutuAdapter", StubAdapter)
 
+    from conftest import flow_auth_headers
+
     from api.flow_stream_server import app
 
-    client = TestClient(app)
+    client = TestClient(app, headers=flow_auth_headers())
     r = client.get("/futu/price?symbol=HK.09999&interval=1d&limit=200")
     assert r.status_code == 200
     body = r.json()
@@ -50,9 +52,11 @@ def test_futu_status_endpoint_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(futu_mod, "FutuAdapter", StubAdapter)
 
+    from conftest import flow_auth_headers
+
     from api.flow_stream_server import app
 
-    client = TestClient(app)
+    client = TestClient(app, headers=flow_auth_headers())
     r = client.get("/futu/status")
     assert r.status_code == 200
     body = r.json()
@@ -69,9 +73,11 @@ def test_futu_status_endpoint_returns_body_when_adapter_raises(
 
     monkeypatch.setattr(futu_mod, "FutuAdapter", BadAdapter)
 
+    from conftest import flow_auth_headers
+
     from api.flow_stream_server import app
 
-    client = TestClient(app)
+    client = TestClient(app, headers=flow_auth_headers())
     r = client.get("/futu/status")
     assert r.status_code == 200
     body = r.json()
@@ -92,9 +98,11 @@ def test_futu_price_endpoint_502_when_adapter_raises(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(futu_mod, "FutuAdapter", BadAdapter)
 
+    from conftest import flow_auth_headers
+
     from api.flow_stream_server import app
 
-    client = TestClient(app)
+    client = TestClient(app, headers=flow_auth_headers())
     r = client.get("/futu/price")
     assert r.status_code == 502
     assert "OpenD" in r.json().get("detail", "")

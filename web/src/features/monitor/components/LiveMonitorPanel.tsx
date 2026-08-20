@@ -255,7 +255,7 @@ export function LiveMonitorPanel({
     try {
       const res = await fetch(`${getFlowApiOrigin()}/engine/paper/book/reset`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-aimm-dashboard": "1" },
         body: JSON.stringify({}),
       });
       const data = (await res.json().catch(() => ({}))) as { detail?: string };

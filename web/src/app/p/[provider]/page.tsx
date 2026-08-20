@@ -53,11 +53,7 @@ export default function PublicProviderPage({ params }: { params: { provider: str
   }, [provider]);
 
   const sseUrl = useMemo(() => {
-    const base = (process.env.NEXT_PUBLIC_FLOW_API_BASE_URL || "http://127.0.0.1:8001").replace(
-      /\/$/,
-      "",
-    );
-    return `${base}/signals/stream?provider=${encodeURIComponent(provider)}&poll_sec=1&limit=30`;
+    return `/api/flow/signals/stream?provider=${encodeURIComponent(provider)}&poll_sec=1&limit=30`;
   }, [provider]);
 
   useEffect(() => {

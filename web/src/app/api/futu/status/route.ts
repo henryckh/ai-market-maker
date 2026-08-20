@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { flowApiBase } from "@/server/flowProxy";
-import { flowAuthHeaders } from "@/app/api/_flowAuth";
+import { flowApiBase, flowAuthHeaders } from "@/server/flowProxy";
 
 /**
  * GET /api/futu/status
@@ -23,7 +22,7 @@ export async function GET() {
 
     const hint401 =
       flowRes.status === 401
-        ? "Flow has AIMM_API_KEY set; add the same AIMM_API_KEY to web/.env.local (or unset AIMM_API_KEY on the Flow process for local-only dev)."
+        ? "Flow rejected the request. Check AIMM_API_KEY on the API."
         : undefined;
 
     return NextResponse.json(

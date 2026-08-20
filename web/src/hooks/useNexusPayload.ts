@@ -6,27 +6,9 @@ import type { NexusPayload } from "@/types/nexus-payload";
 import mockTraces from "@/data/mock-traces.json";
 import { getFlowApiOrigin } from "@/lib/flowApiOrigin";
 
-function resolveFlowWsUrl(runId: string): string {
-  const rid = (runId || "latest").trim() || "latest";
-  const explicit = process.env.NEXT_PUBLIC_FLOW_WS_URL?.trim();
-  if (explicit) {
-    if (explicit.includes("/ws/runs/")) {
-      return explicit.replace(/\/ws\/runs\/[^/?#]+/, `/ws/runs/${encodeURIComponent(rid)}`);
-    }
-    if (explicit.includes("/ws/")) {
-      const base = explicit.replace(/\/$/, "");
-      return `${base.replace(/\/ws\/.*$/, "")}/ws/runs/${encodeURIComponent(rid)}`;
-    }
-    return `${explicit.replace(/\/$/, "")}/ws/runs/${encodeURIComponent(rid)}`;
-  }
-
-  const apiBase = process.env.NEXT_PUBLIC_FLOW_API_BASE_URL?.trim();
-  if (apiBase) {
-    const wsBase = apiBase.replace(/^http:\/\//, "ws://").replace(/^https:\/\//, "wss://");
-    return `${wsBase.replace(/\/$/, "")}/ws/runs/${encodeURIComponent(rid)}`;
-  }
-
-  return `ws://127.0.0.1:8001/ws/runs/${encodeURIComponent(rid)}`;
+function livePayloadUrl(followId: string): string {
+  if (followId === "latest") return "/api/traces";
+  return `${getFlowApiOrigin()}/runs/${encodeURIComponent(followId)}/payload?soft=true`;
 }
 
 /**
@@ -58,10 +40,7 @@ export function useNexusPayload(runId: string = "latest") {
     }
 
     setLoading(true);
-    const httpUrl =
-      followId === "latest"
-        ? "/api/traces"
-        : `${getFlowApiOrigin()}/runs/${encodeURIComponent(followId)}/payload?soft=true`;
+    const httpUrl = livePayloadUrl(followId);
 
     fetchNexusPayloadWithSource(httpUrl)
       .then(({ payload: data, dataSource }) => {
@@ -92,66 +71,29 @@ export function useNexusPayload(runId: string = "latest") {
     if (useMock) return;
 
     let closed = false;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-    const wsEndpoint = resolveFlowWsUrl(followId);
-    let attempt = 0;
+    const httpUrl = livePayloadUrl(followId);
 
-    const cleanup = () => {
-      if (reconnectTimer) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      if (socket) socket.close();
-      socket = null;
-    };
-
-    const connect = () => {
+    const tick = () => {
       if (closed) return;
-      cleanup();
-      socket = new WebSocket(wsEndpoint);
-
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as {
-            type?: string;
-            payload?: NexusPayload;
-          };
-          if (data.type === "payload" && data.payload) {
-            setPayload(data.payload);
-            setTraceDataSource("live");
-            setLoading(false);
-            setError(null);
-          }
-        } catch (e) {
-          setError(e instanceof Error ? e : new Error(String(e)));
-        }
-      };
-
-      socket.onopen = () => {
-        attempt = 0;
-        setWsConnected(true);
-      };
-
-      socket.onclose = () => {
-        setWsConnected(false);
-        if (closed) return;
-        const delay = Math.min(8000, 400 * 2 ** attempt);
-        attempt = Math.min(attempt + 1, 6);
-        reconnectTimer = window.setTimeout(connect, delay);
-      };
-
-      socket.onerror = () => {
-        // Reconnect via onclose
-      };
+      fetchNexusPayloadWithSource(httpUrl)
+        .then(({ payload: data, dataSource }) => {
+          if (closed) return;
+          setPayload(data);
+          setTraceDataSource(dataSource ?? "live");
+          setError(null);
+          setWsConnected(true);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (!closed) setWsConnected(false);
+        });
     };
 
-    connect();
-
+    const interval = window.setInterval(tick, 1000);
     return () => {
       closed = true;
       setWsConnected(false);
-      cleanup();
+      window.clearInterval(interval);
     };
   }, [followId]);
 

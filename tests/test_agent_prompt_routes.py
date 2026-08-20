@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import flow_auth_headers
 from fastapi.testclient import TestClient
 
 from api.flow_stream_server import app
@@ -14,7 +15,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # Use an isolated prompts file per test run.
     prompts_path = tmp_path / "agent_prompts.json"
     monkeypatch.setenv("AIMM_AGENT_PROMPTS_PATH", str(prompts_path))
-    return TestClient(app)
+    return TestClient(app, headers=flow_auth_headers())
 
 
 def test_put_creates_row_then_get_roundtrip(client: TestClient, tmp_path: Path) -> None:
