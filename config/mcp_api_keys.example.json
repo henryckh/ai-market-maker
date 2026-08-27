@@ -1,0 +1,9 @@
+{
+  "demo-nexus-mcp-key": {
+    "strategy_id": "demo-btc-agentic",
+    "run_id": "journey_llm_builder_default",
+    "estimated_aum_usdt": 12500,
+    "label": "Hackathon demo — replace with your strategy binding",
+    "user_id": "demo"
+  }
+}

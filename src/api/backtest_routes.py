@@ -67,7 +67,7 @@ def _job_stale_sec() -> int:
 
 def _run_dir(run_id: str) -> Path:
     rid = require_safe_id(str(run_id), name="run_id")
-    return path_under(BACKTESTS_DIR, rid)
+    return path_under(_resolved_runs_dir() / "backtests", rid)
 
 
 def _job_path(run_id: str) -> Path:

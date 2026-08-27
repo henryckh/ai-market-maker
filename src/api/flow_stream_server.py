@@ -36,6 +36,7 @@ from .desk_tick_routes import router as desk_tick_router
 from .engine_routes import router as engine_router
 from .follow_routes import router as follow_router
 from .leadpage_routes import router as leadpage_router
+from .mcp import router as mcp_router
 from .ops_routes import router as ops_router
 from .paper_routes import router as paper_router
 from .payload_adapter import build_nexus_payload
@@ -108,7 +109,12 @@ def _extract_presented_key(request: Request) -> str | None:
 
 
 def _is_public_http_path(path: str) -> bool:
-    return path == "/health"
+    # MCP uses per-strategy X-API-KEY auth inside the router (not AIMM_API_KEY).
+    if path == "/health" or path == "/mcp/health":
+        return True
+    if path.startswith("/mcp"):
+        return True
+    return False
 
 
 def _with_security_headers(response):
@@ -187,6 +193,7 @@ app.include_router(deploy_router)
 app.include_router(config_designer_router)
 app.include_router(engine_router)
 app.include_router(desk_tick_router)
+app.include_router(mcp_router)
 
 
 def _resolve_run_log(run_id: str) -> Path:
