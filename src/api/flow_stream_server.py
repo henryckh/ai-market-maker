@@ -32,6 +32,7 @@ from .control_plane_secrets import (
 )
 from .copy_routes import router as copy_router
 from .deploy_routes import router as deploy_router
+from .desk_tick_routes import router as desk_tick_router
 from .engine_routes import router as engine_router
 from .follow_routes import router as follow_router
 from .leadpage_routes import router as leadpage_router
@@ -185,6 +186,7 @@ app.include_router(profile_router)
 app.include_router(deploy_router)
 app.include_router(config_designer_router)
 app.include_router(engine_router)
+app.include_router(desk_tick_router)
 
 
 def _resolve_run_log(run_id: str) -> Path:

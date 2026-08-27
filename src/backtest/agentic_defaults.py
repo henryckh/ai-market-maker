@@ -13,22 +13,29 @@ DEFAULT_AGENTIC_PROFILE_WEIGHTS: dict[str, float] = {
     "monetary_sentinel": 0.25,
 }
 
-# Mirrors weighted_arbitrator._V4_DECISION_THRESHOLD / sweep _THR_BASE.
+# Neutral permissive thresholds — the deterministic gates are intentionally
+# wide-open (buy ≥ 51, sell ≤ 49, confidence ≥ 1).  The LLM arbitrator
+# (arbitrator_llm=true) is the real decision-maker.  It receives all agent
+# composite scores, stances, and confidences and can assess regime (bull/bear)
+# before committing to BUY/SELL/HOLD.
+#
+# When no LLM is available (use_llm_synthesis=false), the wide gates still
+# allow the composite signal through, but with no static long/short bias.
 DEFAULT_AGENTIC_DECISION_THRESHOLD: dict[str, Any] = {
-    "buy": {"min_composite": 53, "min_confidence": 16},
-    "sell": {"max_composite": 41, "min_confidence": 26},
+    "buy": {"min_composite": 51, "min_confidence": 1},
+    "sell": {"max_composite": 49, "min_confidence": 1},
     "hold": {"else": True},
     "alignment_gating": {
         "enabled": True,
-        "min_factors_for_directional": 2,
+        "min_factors_for_directional": 1,
         "risk_override_if_blocked": True,
     },
     "ta_led": {
-        "enabled": True,
+        "enabled": False,
         "agent_id": "technical_ta_engine",
-        "buy_min_composite": 57,
-        "sell_max_composite": 43,
-        "min_confidence": 14,
+        "buy_min_composite": 51,
+        "sell_max_composite": 49,
+        "min_confidence": 1,
     },
 }
 

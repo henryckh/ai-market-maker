@@ -60,7 +60,7 @@ def run_tool_calling_chat(
             client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout_s)
         except TypeError:
             client = OpenAI(api_key=api_key, base_url=base_url)
-    env_model = (os.getenv("OPENAI_MODEL") or "").strip() or None
+    env_model = (os.getenv("OPENAI_MODEL") or os.getenv("ATLASCLOUD_MODEL") or "").strip() or None
     model_name = model or llm_config.model
     if base_url and "deepseek" in base_url and env_model and model and model != env_model:
         # This is the classic "provider supports X but we forced Y" mismatch.
@@ -128,6 +128,17 @@ def run_tool_calling_chat(
             signal.alarm(alarm_s)
         try:
             resp = client.chat.completions.create(**create_kwargs)
+            try:
+                from llm.usage import record_usage
+
+                usage = getattr(resp, "usage", None)
+                record_usage(
+                    prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                    calls=1,
+                )
+            except Exception:
+                pass
         except Exception as exc:
             # Provider errors are often opaque; include the resolved model/base_url in logs.
             logger.error(

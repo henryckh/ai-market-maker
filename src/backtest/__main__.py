@@ -32,7 +32,9 @@ def _cmd_run(argv: list[str]) -> int:
     from config.llm_env import require_llm_key
 
     load_dotenv(override=True)
-    os.environ["NEXUS_DISABLE"] = "1"
+    # Allow Nexus when env says so (NEXUS_DISABLE=0 or unset).
+    if os.environ.get("NEXUS_DISABLE") is None:
+        os.environ["NEXUS_DISABLE"] = "1"
     os.environ["MODE"] = "backtest"
     apply_strategy_env_defaults_from_settings(load_app_settings())
 
@@ -108,7 +110,9 @@ def _cmd_windows(argv: list[str]) -> int:
     from config.app_settings import load_app_settings
 
     load_dotenv(override=True)
-    os.environ["NEXUS_DISABLE"] = "1"
+    # Allow Nexus when env says so (NEXUS_DISABLE=0 or unset).
+    if os.environ.get("NEXUS_DISABLE") is None:
+        os.environ["NEXUS_DISABLE"] = "1"
     os.environ["MODE"] = "backtest"
 
     ticker_def = load_app_settings().market.default_ticker

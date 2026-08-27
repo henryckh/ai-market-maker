@@ -6,6 +6,7 @@ Tier-0 agent code.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -28,9 +29,24 @@ class NexusContextProvider(Protocol):
 
 
 def resolve_nexus_provider(*, run_mode: str) -> NexusContextProvider:
-    """Factory: backtest → historical; otherwise live."""
+    """Factory: backtest → remote_historical (preferred) or CSV historical; otherwise live."""
     mode = (run_mode or "").strip().lower()
     if mode in ("backtest", "bt", "historical"):
+        # Prefer remote historical from datalayer-api if URL is configured
+        remote_url = os.getenv("DATALAYER_API_URL") or ""
+        prefer_remote = remote_url.strip() and os.getenv(
+            "NEXUS_PROVIDER_MODE", "remote"
+        ).strip().lower() in ("remote", "auto")
+        if prefer_remote:
+            try:
+                from nexus_data.historical.remote_provider import RemoteNexusProvider
+
+                logger = __import__("logging").getLogger(__name__)
+                logger.info("Using RemoteNexusProvider (datalayer-api: %s)", remote_url)
+                return RemoteNexusProvider(base_url=remote_url)
+            except ImportError:
+                pass
+
         from nexus_data.historical.provider import HistoricalNexusProvider
 
         return HistoricalNexusProvider()

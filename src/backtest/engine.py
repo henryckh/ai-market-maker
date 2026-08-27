@@ -1,30 +1,26 @@
-"""Backtest engine — thin wrapper around PerpEngine.
+"""Backtest engine — batch agentic desks per bar via PerpEngine.
 
-Keeps the public ``BacktestEngine`` interface for compatibility.
-All actual execution logic lives in ``engines/perp.py``.
+All 9 agent desk opinions are computed cross-sectionally per bar, arbitrated
+with dynamic weights (rolling Sharpe), sized through inverse-vol portfolio
+optimization, and decomposed via per-desk P&L attribution.
 
 Perp only (spot removed as of v1.0). Config via dict (no env vars).
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 from typing import Any as _Any
 
-from backtest.data_quality import validate_ohlcv_window
-from backtest.receipts import build_tier0_summary, cot_snippets, nexus_asof_receipt
 from config.app_settings import load_app_settings
-from config.run_mode import RunMode
-from flow_log import FlowEventRepo, set_flow_repo
-from harness.run_memory import IterationReceiptWriter, RunWorkingMemory, now_s, run_memory_config
-from main import build_workflow
+from harness.run_memory import IterationReceiptWriter, RunWorkingMemory, run_memory_config
 
-from .langgraph_adapter import run_perp_backtest
+from .perp_engine_runner import run_perp_backtest
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +52,7 @@ class BacktestConfig:
 
 
 class BacktestEngine:
-    """Backtest entry point — perp only as of v1.0.
+    """Backtest entry point — batch agentic desks, perp only as of v1.0.
 
     Usage::
 
@@ -89,7 +85,6 @@ class BacktestEngine:
             }
         else:
             self._cfg = dict(config or {})
-        self.workflow = build_workflow().compile()
 
     def run(
         self,
@@ -99,13 +94,10 @@ class BacktestEngine:
         run_id: str | None = None,
         runs_dir: Path | None = None,
     ) -> Dict[str, Any]:
-        """Run a perpetual backtest.
+        """Run a perpetual backtest with batch agentic desk execution.
 
-        Delegates to ``run_perp_backtest()`` with the LangGraph workflow
-        as the per-bar signal function.
-
-        ``bars`` (single-symbol) is shorthand for
-        ``bars_by_symbol={ticker: bars}``.
+        All 9 agent desks are invoked cross-sectionally once per bar.
+        Results include full per-desk P&L attribution.
         """
         if bars is not None and bars_by_symbol is not None:
             raise ValueError("provide bars OR bars_by_symbol, not both")
@@ -113,7 +105,6 @@ class BacktestEngine:
             if bars is None:
                 raise ValueError("provide bars or bars_by_symbol")
             bars_by_symbol = {ticker: list(bars)}
-
         if bars is not None and ticker not in bars_by_symbol:
             bars_by_symbol[ticker] = list(bars)
 
@@ -128,7 +119,6 @@ class BacktestEngine:
 
         from backtest.terminal_log import (
             configure_backtest_terminal_logging,
-            print_bar_decision,
             print_run_header,
             print_run_summary,
         )
@@ -161,16 +151,24 @@ class BacktestEngine:
         bar_count = max(len(rows) for rows in bars_by_symbol.values())
         eval_steps = int(c.get("eval_steps") or max(2, bar_count - ta_warmup))
 
+        # Extract TP/SL from deploy JSON execution block (if not already set at top level)
+        _deploy = c.get("deploy_config") if isinstance(c.get("deploy_config"), dict) else {}
+        _exec = _deploy.get("execution") if isinstance(_deploy.get("execution"), dict) else {}
+        tp = float(c.get("take_profit_pct") or _exec.get("take_profit_pct") or 0.0)
+        sl = float(c.get("stop_loss_pct") or _exec.get("stop_loss_pct") or 0.0)
+        lev = float(c.get("leverage") or _exec.get("leverage") or fp.max_leverage)
+        slip_bps = float(c.get("slippage_bps") or _exec.get("slippage_bps") or 5.0)
+
         perp_cfg = {
             "initial_cash": float(c.get("initial_cash_usd", 10_000)),
-            "leverage": float(c.get("leverage", fp.max_leverage)),
+            "leverage": lev,
             "taker_rate": float(c.get("fee_bps", 10.0)) / 10_000,
             "maker_rate": float(c.get("fee_bps", 10.0)) / 10_000,
-            "slippage": float(c.get("slippage_bps", 5.0)) / 10_000,
+            "slippage": slip_bps / 10_000,
             "funding_rate": 0.0001,
             "interval_sec": int(c.get("interval_sec", 300)),
-            "take_profit_pct": float(c.get("take_profit_pct", 0.0)),
-            "stop_loss_pct": float(c.get("stop_loss_pct", 0.0)),
+            "take_profit_pct": tp,
+            "stop_loss_pct": sl,
             "max_hold_bars": int(c.get("max_hold_bars", 0)),
             "trade_cooldown_bars": int(c.get("trade_cooldown_bars", fp.trade_cooldown_bars)),
             "timeframe": str(c.get("timeframe", "")),
@@ -194,404 +192,67 @@ class BacktestEngine:
             ),
         )
 
-        _pw = c.get("deploy_profile_weights")
-        if isinstance(_pw, dict) and _pw:
-            _active_agents = [
-                str(k) for k, v in sorted(_pw.items(), key=lambda x: -float(x[1] or 0))
-            ]
-        else:
-            _active_agents = ["technical_ta_engine", "pattern_recognition_bot", "monetary_sentinel"]
-
         run_mem = RunWorkingMemory(cfg=run_memory_config(settings))
 
-        from backtest.symbol_routing import resolve_agent_led_symbols, uses_mixed_routing
+        # ---- Batch agentic desk execution ----
+        logger.info("Batch agentic mode — cross-sectional desk execution per bar")
+        from quant.batch_signal_adapter import batch_signal_factory
 
-        agent_led_set = frozenset(
-            resolve_agent_led_symbols(
-                universe=list(bars_by_symbol.keys()),
-                deploy_cfg=c.get("deploy_config")
-                if isinstance(c.get("deploy_config"), dict)
-                else None,
-                explicit=c.get("agent_led_symbols"),
-            )
+        # Resolve nexus provider for historical data
+        nexus_provider = None
+        try:
+            from nexus_data.provider import resolve_nexus_provider
+
+            nexus_provider = resolve_nexus_provider(run_mode="backtest")
+        except Exception:
+            pass
+
+        signal_fn = batch_signal_factory(
+            bars_by_symbol=bars_by_symbol,
+            symbols=list(bars_by_symbol.keys()),
+            config=c,
+            nexus_context_provider=nexus_provider,
+            receipt_writer=receipt_writer,
+            run_id=run_id,
+            run_mem=run_mem,
         )
-        c["agent_led_symbols"] = sorted(agent_led_set)
-        if uses_mixed_routing(agent_led_set, list(bars_by_symbol.keys())):
-            os.environ.setdefault("AIMM_BACKTEST_PER_SYMBOL_INVOKE", "1")
-        multi_asset = len(bars_by_symbol) > 1
-        if multi_asset:
-            os.environ["AIMM_BACKTEST_PER_SYMBOL_INVOKE"] = "1"
-        btc_ref_sym = ticker if ticker in bars_by_symbol else next(iter(bars_by_symbol), "")
-
-        _invoke_cache: dict[Any, dict[str, Any]] = {}
-        _equity_peak: dict[str, float] = {"v": 0.0}
-
-        def _signal_fn(symbol: str, window: list, positions, account) -> float:
-            from backtest.engines.perp import coerce_account
-            from schemas.state import initial_hedge_fund_state
-
-            book = coerce_account(account)
-            capital = book.cash
-            equity = book.equity
-
-            bar_index = len(window) if isinstance(window, list) else 0
-            min_warmup_bars = int(
-                c.get("min_warmup_bars", getattr(settings.backtest, "min_warmup_bars", 0)) or 0
-            )
-            if min_warmup_bars > 0 and bar_index < min_warmup_bars:
-                return 0.0
-
-            if symbol not in agent_led_set:
-                from backtest.vcp_signal import vcp_target_weight_from_window
-
-                btc_window = None
-                if btc_ref_sym and btc_ref_sym in bars_by_symbol and btc_ref_sym != symbol:
-                    btc_window = list(bars_by_symbol[btc_ref_sym])[:bar_index]
-                tw, vcp_meta = vcp_target_weight_from_window(
-                    symbol,
-                    window if isinstance(window, list) else [],
-                    btc_window=btc_window,
-                    timeframe=str(c.get("timeframe", "")),
-                    interval_sec=int(c.get("interval_sec", 300)),
-                )
-                dec = vcp_meta.get("decision") if isinstance(vcp_meta.get("decision"), dict) else {}
-                action = str(dec.get("action") or "HOLD")
-                conf = float(dec.get("confidence") or abs(tw))
-                stance = str(dec.get("stance") or ("bullish" if tw > 0 else "neutral"))
-                run_mem.record_decision(
-                    {
-                        "symbol": str(symbol),
-                        "action": action,
-                        "stance": stance,
-                        "confidence": conf,
-                        "strategy": "vcp",
-                    }
-                )
-                try:
-                    receipt_writer.append(
-                        {
-                            "ts": now_s(),
-                            "run_id": run_id,
-                            "bar_index": bar_index,
-                            "symbol": str(symbol),
-                            "strategy": "vcp",
-                            "decision": {"action": action, "stance": stance, "confidence": conf},
-                            "vcp": {
-                                k: vcp_meta[k]
-                                for k in (
-                                    "vcp_score",
-                                    "passed_strict",
-                                    "passed_relaxed",
-                                    "distance_to_pivot_pct",
-                                    "scan_tf",
-                                    "bar_count",
-                                    "error",
-                                )
-                                if k in vcp_meta
-                            },
-                            "memory": run_mem.to_shared_memory_fragment(),
-                        }
-                    )
-                except Exception:
-                    pass
-                return float(tw)
-
-            state = initial_hedge_fund_state(ticker=symbol, run_mode=RunMode.BACKTEST.value)
-
-            deploy_profile_weights = c.get("deploy_profile_weights")
-            if deploy_profile_weights:
-                state["profile_weights"] = deploy_profile_weights
-            deploy_profile_id = c.get("deploy_profile_id")
-            if deploy_profile_id:
-                state["profile_id"] = deploy_profile_id
-            deploy_arb_mode = c.get("deploy_arbitrator_mode")
-            if deploy_arb_mode:
-                state["arbitrator_mode"] = deploy_arb_mode
-            deploy_cfg = c.get("deploy_config")
-            if isinstance(deploy_cfg, dict):
-                dt = deploy_cfg.get("decision_threshold")
-                if isinstance(dt, dict) and dt:
-                    state["decision_threshold"] = dt
-                exec_cfg = deploy_cfg.get("execution")
-                if isinstance(exec_cfg, dict):
-                    if "arbitrator_llm" in exec_cfg:
-                        state["arbitrator_llm"] = bool(exec_cfg.get("arbitrator_llm"))
-            state["universe"] = list(bars_by_symbol.keys())
-            state["market_data"] = {
-                s: {
-                    "status": "success",
-                    "backtest": True,
-                    # Slice OHLCV to completed bars only (no look-ahead).
-                    "ohlcv": list(bars_by_symbol[s])[: len(window)]
-                    if window
-                    else list(bars_by_symbol.get(s, []))[:0],
-                }
-                for s in bars_by_symbol
-            }
-
-            sm = state.setdefault("shared_memory", {})
-            iv_sec = int(c.get("interval_sec", 300))
-            peak = float(_equity_peak.get("v") or 0.0)
-            eq_f = float(equity)
-            if eq_f > peak:
-                peak = eq_f
-                _equity_peak["v"] = peak
-            dd_frac = (1.0 - (eq_f / peak)) if peak > 1e-12 else 0.0
-            primary_pos = positions.get(symbol)
-            primary_qty = 0.0
-            if primary_pos is not None:
-                try:
-                    primary_qty = float(primary_pos.size) * (
-                        1.0 if int(getattr(primary_pos, "direction", 1) or 1) >= 0 else -1.0
-                    )
-                except (TypeError, ValueError, AttributeError):
-                    primary_qty = 0.0
-            sm["backtest"] = {
-                "cash": float(capital),
-                "equity": eq_f,
-                "equity_peak": peak,
-                "dd_frac": dd_frac,
-                "qty": primary_qty,
-                "positions": {
-                    k: {
-                        "size": float(v.size),
-                        "entry": float(v.entry_price),
-                        "direction": int(getattr(v, "direction", 1) or 1),
-                        "qty_signed": float(v.size)
-                        * (1.0 if int(getattr(v, "direction", 1) or 1) >= 0 else -1.0),
-                    }
-                    for k, v in positions.items()
-                },
-                "window_len": len(window) if isinstance(window, list) else None,
-                "window_last_ts_ms": (
-                    float(window[-1][0])
-                    if isinstance(window, list)
-                    and window
-                    and isinstance(window[-1], list)
-                    and len(window[-1]) > 0
-                    else None
-                ),
-                "interval_sec": iv_sec,
-                "timeframe": c.get("timeframe", ""),
-                "run_id": c.get("run_id", ""),
-                "symbol": str(symbol),
-                "allows_short": bool(c.get("allows_short", True)),
-            }
-            sm["memory"] = run_mem.to_shared_memory_fragment()
-
-            # Nexus context is attached by market_scan via HistoricalNexusProvider
-            # (as_of = window_last_ts_ms). Engine only stamps backtest clock metadata.
-
-            last_ts = sm["backtest"].get("window_last_ts_ms")
-            run_mem.record_view(
-                {
-                    "symbol": str(symbol),
-                    "universe": list(state.get("universe") or []),
-                    "window_len": sm["backtest"].get("window_len"),
-                    "window_last_ts_ms": last_ts,
-                }
-            )
-
-            dq_passed = True
-            dq_warnings: list[str] = []
-            primary_md = state.get("market_data", {}).get(symbol, {})
-            ohlcv_for_dq = primary_md.get("ohlcv", window) if isinstance(window, list) else window
-            if isinstance(ohlcv_for_dq, list):
-                dq_result = validate_ohlcv_window(
-                    ohlcv_for_dq,
-                    symbol=symbol,
-                    expected_ticker=symbol,
-                    interval_sec=int(c.get("interval_sec", 300)),
-                    min_bars=2 if isinstance(window, list) and len(window) >= 2 else 1,
-                )
-                dq_passed = dq_result.passed
-                dq_warnings = dq_result.warnings
-                sm["backtest"]["data_quality"] = {
-                    "passed": dq_passed,
-                    "warnings": dq_warnings,
-                    "checks": dq_result.checks,
-                }
-
-            if not dq_passed:
-                logger.warning(
-                    "data_quality FAIL for %s bar %d: %s",
-                    symbol,
-                    len(window),
-                    " | ".join(dq_warnings),
-                )
-                try:
-                    receipt_writer.append(
-                        {
-                            "ts": now_s(),
-                            "run_id": run_id,
-                            "symbol": str(symbol),
-                            "backtest": sm.get("backtest"),
-                            "memory": run_mem.to_shared_memory_fragment(),
-                            "decision": {"action": "HOLD", "stance": "neutral", "confidence": 0.0},
-                            "data_quality": {"passed": False, "warnings": dq_warnings},
-                            "reason": "data_quality_gate",
-                        }
-                    )
-                except Exception:
-                    pass
-                return 0.0
-
-            invoke_cache_hit = False
-            per_sym_invoke = (
-                multi_asset or os.environ.get("AIMM_BACKTEST_PER_SYMBOL_INVOKE", "").strip() == "1"
-            )
-
-            try:
-                if per_sym_invoke:
-                    bar_key = (len(window), symbol)
-                else:
-                    bar_key = len(window)
-                cached = _invoke_cache.get(bar_key)
-                if cached is None:
-                    output = self.workflow.invoke(state)
-                    _invoke_cache[bar_key] = output
-                else:
-                    output = cached
-                    invoke_cache_hit = True
-                intent = output.get("trade_intent") if isinstance(output, dict) else None
-                intent = intent if isinstance(intent, dict) else {}
-                action = str(intent.get("action") or "").strip().upper()
-                conf_raw = intent.get("confidence", 0.0)
-                try:
-                    conf = float(conf_raw) if conf_raw is not None else 0.0
-                except Exception:
-                    conf = 0.0
-                conf = max(0.0, min(1.0, conf))
-
-                # Risk Guard must gate fills — portfolio_execute skip alone is not enough.
-                if isinstance(output, dict) and output.get("is_vetoed"):
-                    action = "HOLD"
-                    conf = 0.0
-
-                stance = "neutral"
-                sign = 0.0
-                if action == "BUY":
-                    stance = "bullish"
-                    sign = 1.0
-                elif action == "SELL":
-                    stance = "bearish"
-                    sign = -1.0
-                run_mem.record_decision(
-                    {
-                        "symbol": str(symbol),
-                        "action": action,
-                        "stance": stance,
-                        "confidence": conf,
-                    }
-                )
-                try:
-                    prop = output.get("proposed_signal") if isinstance(output, dict) else None
-                    p_params = prop.get("params") if isinstance(prop, dict) else None
-                    te = p_params.get("tool_events") if isinstance(p_params, dict) else None
-                    if isinstance(te, list) and te:
-                        run_mem.record_tool_event_summary(
-                            {
-                                "symbol": str(symbol),
-                                "tool_events_count": len(te),
-                                "tools": [
-                                    str(x.get("name") or x.get("wire_name") or "")
-                                    for x in te
-                                    if isinstance(x, dict)
-                                ][:8],
-                            }
-                        )
-                except Exception:
-                    pass
-
-                try:
-                    # Execution bar index: len(completed_window) == bar being traded at open.
-                    bar_index = len(window) if isinstance(window, list) else 0
-                    rec: dict[str, Any] = {
-                        "ts": now_s(),
-                        "run_id": run_id,
-                        "bar_index": bar_index,
-                        "symbol": str(symbol),
-                        "strategy": "agent",
-                        "backtest": sm.get("backtest"),
-                        "memory": run_mem.to_shared_memory_fragment(),
-                        "decision": {"action": action, "stance": stance, "confidence": conf},
-                    }
-                    dq_store = sm.get("backtest", {}).get("data_quality", {})
-                    if dq_store.get("passed") is not None:
-                        rec["data_quality"] = dq_store
-                    if invoke_cache_hit:
-                        rec["invoke_cache_shared"] = True
-                    if isinstance(output, dict):
-                        tier0 = build_tier0_summary(output)
-                        if tier0:
-                            rec["tier0_summary"] = tier0
-                        cot = cot_snippets(output)
-                        if cot:
-                            rec["cot"] = cot
-                    asof = nexus_asof_receipt(output if isinstance(output, dict) else None)
-                    if not asof:
-                        asof = nexus_asof_receipt(state)
-                    if asof:
-                        rec["nexus_asof"] = asof
-                    receipt_writer.append(rec)
-                except Exception:
-                    pass
-
-                close_px: float | None = None
-                if isinstance(window, list) and window:
-                    try:
-                        close_px = float(window[-1][4])
-                    except (IndexError, TypeError, ValueError):
-                        close_px = None
-                if isinstance(output, dict):
-                    print_bar_decision(
-                        bar_index=len(window) if isinstance(window, list) else 0,
-                        total_bars=bar_count,
-                        symbol=str(symbol),
-                        primary_symbol=str(ticker),
-                        close=close_px,
-                        ts_ms=last_ts,
-                        wf_output=output,
-                        action=action,
-                        confidence=conf,
-                        equity=float(equity),
-                        invoke_cache_hit=invoke_cache_hit,
-                        active_agent_ids=_active_agents,
-                    )
-
-                # Cap sizing: confidence maps directly to target weight in perp engine.
-                weight = float(sign) * min(conf, 0.45)
-                return weight
-            except Exception as exc:
-                try:
-                    err_rec: dict[str, Any] = {
-                        "ts": now_s(),
-                        "run_id": run_id,
-                        "symbol": str(symbol),
-                        "backtest": sm.get("backtest"),
-                        "memory": run_mem.to_shared_memory_fragment(),
-                        "error": str(exc),
-                    }
-                    if invoke_cache_hit:
-                        err_rec["invoke_cache_shared"] = True
-                    receipt_writer.append(err_rec)
-                except Exception:
-                    pass
-                import traceback
-
-                tb_str = traceback.format_exc()
-                print(f"[Backtest Warning] Workflow failed at step: {exc}\n{tb_str}")
-                return 0.0
 
         result = run_perp_backtest(
             ticker=ticker,
             bars_by_symbol=bars_by_symbol,
-            signal_fn=_signal_fn,
+            signal_fn=signal_fn,
             config=perp_cfg,
             run_id=run_id,
             runs_dir=runs_dir,
             progress_callback=c.get("progress_callback"),
         )
+
+        # ---- Attach attribution summary ----
+        attr_obj = getattr(signal_fn, "attribution", None)
+        if attr_obj is not None:
+            attr_summary = attr_obj.summary()
+            result["attribution"] = attr_summary
+            result["desk_pnl"] = attr_summary.get("desk_cumulative_pnl", {})
+            result["desk_sharpes"] = attr_summary.get("desk_sharpe_ratios", {})
+
+        # Write attribution JSONL
+        try:
+            attr_path = bt_dir / "attribution.jsonl"
+            with open(attr_path, "w") as f:
+                for line in attr_obj.to_jsonl():
+                    f.write(line + "\n")
+            result.setdefault("paths", {})["attribution"] = str(attr_path)
+        except Exception:
+            pass
+
+        # Write attribution summary JSON
+        try:
+            attr_summary_path = bt_dir / "attribution_summary.json"
+            with open(attr_summary_path, "w") as f:
+                json.dump(attr_summary, f, indent=2)
+            result.setdefault("paths", {})["attribution_summary"] = str(attr_summary_path)
+        except Exception:
+            pass
 
         m = result.get("metrics", {})
         events_path = runs_dir / f"{run_id}.events.jsonl"
@@ -603,6 +264,8 @@ class BacktestEngine:
             "equity": str(runs_dir / "backtests" / run_id / "equity.jsonl"),
             "iterations": str(iterations_path),
             "events": str(events_path) if events_path.exists() else str(events_path),
+            "attribution": result.get("paths", {}).get("attribution", ""),
+            "attribution_summary": result.get("paths", {}).get("attribution_summary", ""),
         }
         print_run_summary(
             run_id=result.get("run_id", run_id),
@@ -624,15 +287,18 @@ class BacktestEngine:
             "final_equity": result.get("final_equity", perp_cfg["initial_cash"]),
             "benchmark": bench_out,
             "paths": paths,
+            "attribution": result.get("attribution", {}),
+            "desk_pnl": result.get("desk_pnl", {}),
+            "desk_sharpes": result.get("desk_sharpes", {}),
         }
 
     @staticmethod
     def _init_logging(run_id: str, runs_dir: Path) -> None:
+        from flow_log import FlowEventRepo, set_flow_repo
+
         lp = runs_dir / f"{run_id}.events.jsonl"
         if lp.exists():
             lp.unlink()
-        # Research owns backtest streams (explicit /ws/runs/{bt-id}).
-        # Do not steal Live desk's latest_run.txt — write a dedicated pointer instead.
         try:
             (runs_dir / "latest_backtest.txt").write_text(run_id)
         except Exception:

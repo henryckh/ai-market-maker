@@ -129,8 +129,11 @@ def resolve_backtest_config(
             result["arbitrator_mode"] = ARBITRATOR_WEIGHTED_CONVERGENCE
             result["use_llm"] = False
 
+        # Keep raw agents + execution blocks so consumers never lose llm_enabled /
+        # desk flags when reading the resolved config (was a silent format break).
         agents = deploy_cfg.get("agents")
         if isinstance(agents, dict) and agents:
+            result["agents"] = dict(agents)
             weights: dict[str, float] = {}
             for name, meta in agents.items():
                 if not isinstance(meta, dict) or meta.get("enabled", True) is False:
@@ -143,6 +146,9 @@ def resolve_backtest_config(
                 positive = {k: v for k, v in weights.items() if v > 0}
                 if positive:
                     result["profile_weights"] = positive
+
+        if isinstance(exec_cfg, dict) and exec_cfg:
+            result["execution"] = dict(exec_cfg)
 
         dt = deploy_cfg.get("decision_threshold")
         if isinstance(dt, dict) and dt:
@@ -213,7 +219,17 @@ def set_env_from_config(cfg: dict[str, Any]) -> None:
     os.environ.pop("AIMM_LLM_AGENTS", None)
     os.environ.pop("AIMM_LLM_DESK_DEBATE", None)
     os.environ["MODE"] = "backtest"
-    os.environ["NEXUS_DISABLE"] = "1"
+    # Historical Nexus via datalayer-api snapshots instead of NEXUS_DISABLE=1.
+    # Falls back to CSV HistoricalNexusProvider if datalayer-api is unavailable.
+    os.environ.setdefault("DATALAYER_API_URL", "http://localhost:3001")
+    os.environ.setdefault("NEXUS_PROVIDER_MODE", "remote")
+    os.environ.setdefault("AIMM_NEXUS_MODE", "historical")
+
+    # Decision cache for reproducible LLM backtests
+    os.environ.setdefault("AIMM_DECISION_CACHE_DIR", ".cache/decisions")
+
+    # Screening tool calls for LLM agents (on by default, set to 0 to disable)
+    os.environ.setdefault("AIMM_AGENT_TOOL_CALLS", "1")
 
     if cfg.get("deploy_path"):
         os.environ["AIMM_DEPLOY_CONFIG_PATH"] = str(cfg["deploy_path"])

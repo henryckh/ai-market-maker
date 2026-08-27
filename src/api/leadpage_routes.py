@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import math
 import numbers
 import os
@@ -69,6 +70,10 @@ EXTERNAL_RESULTS_JSONL = LEADPAGE_DIR / "external_results.jsonl"
 LOCAL_SCAN_RESULTS_JSONL = LEADPAGE_DIR / "local_scan_results.jsonl"
 
 router = APIRouter(tags=["leadpage"])
+logger = logging.getLogger(__name__)
+
+# Local uvicorn has no Docker DNS for host `db`. Probe once, then skip.
+_db_leaderboard_skip_reason: str | None = None
 
 PROVIDER_KEYS_ENV = "LEADPAGE_PROVIDER_KEYS"
 REQUIRE_KEYS_ENV = "LEADPAGE_REQUIRE_KEYS"
@@ -159,6 +164,34 @@ def _is_low_quality_smoke_row(row: dict[str, Any]) -> bool:
     return False
 
 
+def _is_private_tenant_summary(summary: dict[str, Any]) -> bool:
+    """SaaS strategy runs write deploy JSON under .runs/tenants/<user>/ — never auto-publish."""
+    cfg = summary.get("resolved_config") if isinstance(summary.get("resolved_config"), dict) else {}
+    path = str(cfg.get("deploy_path") or "").replace("\\", "/")
+    return "/tenants/" in path
+
+
+def _safe_db_leaderboard_rows(
+    *,
+    limit: int,
+    provider: str | None,
+    sort_by: Literal["return", "sharpe", "mdd"],
+) -> list[dict[str, Any]]:
+    """Postgres is optional locally; a missing docker `db` host must not 500 the public page."""
+    global _db_leaderboard_skip_reason
+    if _db_leaderboard_skip_reason:
+        return []
+    try:
+        return _db_leaderboard_rows(limit=limit, provider=provider, sort_by=sort_by)
+    except Exception as e:
+        _db_leaderboard_skip_reason = str(e).split("\n", 1)[0][:240]
+        logger.warning(
+            "leaderboard postgres unavailable (%s); skipping DB rows for this process",
+            _db_leaderboard_skip_reason,
+        )
+        return []
+
+
 def _overlay_disk_summary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fill gaps from ``.runs/backtests/<run_id>/summary.json`` when Postgres/JSONL rows are stale or partial."""
     out: list[dict[str, Any]] = []
@@ -168,7 +201,7 @@ def _overlay_disk_summary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any
             out.append(row)
             continue
         summary = _load_local_summary(rid.strip())
-        if not summary:
+        if not summary or _is_private_tenant_summary(summary):
             out.append(row)
             continue
         disk = _leaderboard_row_from_summary(run_id=rid.strip(), summary=summary)
@@ -490,6 +523,23 @@ def _sanitize_leaderboard_sharpe(v: Any) -> float | None:
     return sh
 
 
+def _strategy_title_from_summary(summary: dict[str, Any]) -> str | None:
+    """Human strategy name — never fall back to the traded ticker."""
+    strat = summary.get("strategy") if isinstance(summary.get("strategy"), dict) else {}
+    for key in ("title", "name", "label"):
+        val = strat.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    cfg = summary.get("resolved_config") if isinstance(summary.get("resolved_config"), dict) else {}
+    deploy_desc = cfg.get("deploy_description")
+    if isinstance(deploy_desc, str) and deploy_desc.strip():
+        return deploy_desc.strip()
+    top = summary.get("description")
+    if isinstance(top, str) and top.strip():
+        return top.strip()
+    return None
+
+
 def _leaderboard_row_from_summary(*, run_id: str, summary: dict[str, Any]) -> dict[str, Any]:
     evaluation = summary.get("evaluation") if isinstance(summary.get("evaluation"), dict) else {}
     metrics = summary.get("metrics") if isinstance(summary.get("metrics"), dict) else {}
@@ -572,7 +622,9 @@ def _leaderboard_row_from_summary(*, run_id: str, summary: dict[str, Any]) -> di
 
     syms = summary.get("symbols")
     ticker = summary.get("ticker")
-    if not ticker and isinstance(syms, list) and syms:
+    if isinstance(syms, list) and len(syms) >= 2:
+        ticker = ",".join(str(s) for s in syms[:6])
+    elif not ticker and isinstance(syms, list) and syms:
         ticker = str(syms[0])
 
     return {
@@ -580,9 +632,7 @@ def _leaderboard_row_from_summary(*, run_id: str, summary: dict[str, Any]) -> di
         "provider": "local",
         "ts": ts_out,
         "run_id": run_id,
-        "title": summary.get("strategy", {}).get("title")
-        if isinstance(summary.get("strategy"), dict)
-        else None,
+        "title": _strategy_title_from_summary(summary),
         "ticker": ticker,
         "steps": summary.get("steps") or summary.get("total_bars"),
         "trade_count": int(trade_count) if isinstance(trade_count, (int, float)) else None,
@@ -638,6 +688,8 @@ def _local_backtest_history_rows_from_disk(*, limit: int) -> list[dict[str, Any]
         summary = _load_local_summary(run_id)
         if not summary:
             continue
+        if _is_private_tenant_summary(summary):
+            continue
         lb = _leaderboard_row_from_summary(run_id=run_id, summary=summary)
         ts_raw = lb.get("ts")
         ts_out = (
@@ -656,6 +708,8 @@ def _local_backtest_history_rows_from_disk(*, limit: int) -> list[dict[str, Any]
                 "sharpe": lb.get("sharpe"),
                 "max_drawdown_pct": lb.get("max_drawdown_pct"),
                 "trade_count": lb.get("trade_count"),
+                "win_rate": lb.get("win_rate"),
+                "change_pct": lb.get("change_pct"),
                 "meta": {"kind": "local_backtest_summary", "summary": summary},
             }
         )
@@ -1043,7 +1097,7 @@ def get_leaderboard(
         if _db_url():
             # In DB mode, local results can be synced by a platform worker (decoupled from engine/backtest code).
             rows.extend(
-                _db_leaderboard_rows(limit=int(limit) * 4, provider="local", sort_by=sort_by)
+                _safe_db_leaderboard_rows(limit=int(limit) * 4, provider="local", sort_by=sort_by)
             )
         if BACKTESTS_DIR.is_dir():
             # File-based fallback (also works even when DB mode is on).
@@ -1054,6 +1108,8 @@ def get_leaderboard(
                 summary = _load_local_summary(run_id)
                 if not summary:
                     continue
+                if _is_private_tenant_summary(summary):
+                    continue
                 rows.append(_leaderboard_row_from_summary(run_id=run_id, summary=summary))
         # Local scan loop results (paper/live runs) emitted by `src/main.py`.
         for r in _read_jsonl(LOCAL_SCAN_RESULTS_JSONL, limit=2000):
@@ -1062,7 +1118,9 @@ def get_leaderboard(
 
     if include_external:
         if _db_url():
-            ext = _db_leaderboard_rows(limit=int(limit) * 4, provider=provider, sort_by=sort_by)
+            ext = _safe_db_leaderboard_rows(
+                limit=int(limit) * 4, provider=provider, sort_by=sort_by
+            )
         else:
             ext = _read_jsonl(EXTERNAL_RESULTS_JSONL)
         if provider:

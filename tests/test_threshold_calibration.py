@@ -1,13 +1,13 @@
-"""Threshold calibration: prove BUY/SELL are reachable with current thresholds.
+"""Threshold calibration: prove BUY/SELL are reachable with neutral permissive thresholds.
 
 Confidence formula (from ``weight_assigner.compute_global_weighted_score``):
     magnitude = |composite - 0.50| * 2.0         # [0, 1]
     multiplier = min(1.0, 0.5 + consensus_ratio * 0.5)  # [0.5, 1.0]
     confidence = magnitude * multiplier           # [0, 1]
 
-Thresholds (``_V4_DECISION_THRESHOLD`` in weighted_arbitrator.py):
-    BUY:  composite >= 0.55  AND  confidence >= 0.10
-    SELL: composite <= 0.45  AND  confidence >= 0.10
+Thresholds (neutral, permissive — LLM arbitrator is the real gate):
+    BUY:  composite >= 0.51  AND  confidence >= 0.01
+    SELL: composite <= 0.49  AND  confidence >= 0.01
 
 Tests use the **real v4 agent weights** (not uniform) to match production.
 """
@@ -54,45 +54,37 @@ def _nth_bearish(n: int, composite: float = 0.40) -> list[AgentWeightedSignal]:
 
 
 # ---------------------------------------------------------------------------
-# Reachability — BUY side
+# Reachability — BUY side (neutral thresholds: composite ≥ 0.51, confidence ≥ 0.01)
 # ---------------------------------------------------------------------------
 
 
-def test_buy_reachable_at_5_of_9_with_real_weights():
-    """5/9 bullish at 0.60 with real weights → composite~0.56, confidence~0.11 → BUY."""
-    signals = _nth_bullish(5, 0.60)
+def test_buy_reachable_at_2_of_9_with_real_weights():
+    """2/9 bullish at 0.55 with real weights → composite > 0.51, confidence ≥ 0.01 → BUY."""
+    signals = _nth_bullish(2, 0.55)
     score = compute_global_weighted_score(signals)
-    assert score["confidence"] >= 0.10, (
-        f"5/9 at 0.60: composite={score['composite']:.3f}, "
-        f"confidence={score['confidence']:.3f} should be >= 0.10"
+    assert score["composite"] >= 0.51, (
+        f"2/9 at 0.55: composite={score['composite']:.3f} should be >= 0.51"
+    )
+    assert score["confidence"] >= 0.01, (
+        f"2/9 at 0.55: confidence={score['confidence']:.3f} should be >= 0.01"
     )
 
 
-def test_buy_not_triggered_at_4_of_9_with_real_weights():
-    """4/9 bullish at 0.60 → confidence < 0.10 → HOLD."""
-    signals = _nth_bullish(4, 0.60)
+def test_buy_still_triggered_at_1_of_9():
+    """1/9 bullish at 0.56 → still passes permissive threshold."""
+    signals = _nth_bullish(1, 0.56)
     score = compute_global_weighted_score(signals)
-    assert score["confidence"] < 0.10, (
-        f"4/9 at 0.60: confidence={score['confidence']:.3f} should be < 0.10"
+    assert score["composite"] >= 0.51, (
+        f"1/9 at 0.56: composite={score['composite']:.3f} should be >= 0.51"
     )
 
 
-def test_buy_not_triggered_at_low_composite():
-    """5/9 bullish at 0.55 (threshold edge) → confidence < 0.10 → HOLD."""
-    signals = _nth_bullish(5, 0.55)
+def test_neutral_agents_no_buy():
+    """All agents neutral at 0.50 → composite stays at 0.50, below buy threshold."""
+    signals = _nth_bullish(0, 0.50)
     score = compute_global_weighted_score(signals)
-    assert score["confidence"] < 0.10, (
-        f"5/9 at 0.55: confidence={score['confidence']:.3f} should be < 0.10"
-    )
-
-
-def test_buy_reachable_at_5_of_9_composite_0_62():
-    """5/9 bullish at 0.62 → confidence >= 0.10 → BUY."""
-    signals = _nth_bullish(5, 0.62)
-    score = compute_global_weighted_score(signals)
-    assert score["confidence"] >= 0.10, (
-        f"5/9 at 0.62: composite={score['composite']:.3f}, "
-        f"confidence={score['confidence']:.3f} should be >= 0.10"
+    assert score["composite"] < 0.51, (
+        f"all neutral: composite={score['composite']:.3f} should be < 0.51"
     )
 
 
@@ -106,31 +98,33 @@ def test_buy_stronger_with_more_consensus():
 
 
 # ---------------------------------------------------------------------------
-# Reachability — SELL side (symmetric)
+# Reachability — SELL side (symmetric: composite ≤ 0.49, confidence ≥ 0.01)
 # ---------------------------------------------------------------------------
 
 
-def test_sell_reachable_at_5_of_9():
-    """5/9 bearish at 0.40 with real weights → SELL."""
-    signals = _nth_bearish(5, 0.40)
+def test_sell_reachable_at_2_of_9():
+    """2/9 bearish at 0.45 with real weights → SELL."""
+    signals = _nth_bearish(2, 0.45)
     score = compute_global_weighted_score(signals)
-    assert score["confidence"] >= 0.10, (
-        f"5/9 bearish at 0.40: composite={score['composite']:.3f}, "
-        f"confidence={score['confidence']:.3f} should be >= 0.10"
+    assert score["composite"] <= 0.49, (
+        f"2/9 bearish at 0.45: composite={score['composite']:.3f} should be <= 0.49"
+    )
+    assert score["confidence"] >= 0.01, (
+        f"2/9 bearish at 0.45: confidence={score['confidence']:.3f} should be >= 0.01"
     )
 
 
-def test_sell_not_triggered_at_3_of_9():
-    """3/9 bearish at 0.40 → confidence < 0.10 → HOLD."""
-    signals = _nth_bearish(3, 0.40)
+def test_sell_still_triggered_at_1_of_9():
+    """1/9 bearish at 0.44 → still passes permissive threshold."""
+    signals = _nth_bearish(1, 0.44)
     score = compute_global_weighted_score(signals)
-    assert score["confidence"] < 0.10, (
-        f"3/9 bearish at 0.40: confidence={score['confidence']:.3f} should be < 0.10"
+    assert score["composite"] <= 0.49, (
+        f"1/9 bearish at 0.44: composite={score['composite']:.3f} should be <= 0.49"
     )
 
 
 # ---------------------------------------------------------------------------
-# Documentation — formula trace
+# Documentation — formula trace (neutral thresholds)
 # ---------------------------------------------------------------------------
 
 
@@ -145,15 +139,13 @@ def test_documentation_table(capsys):
         return magnitude * multiplier
 
     cases: list[tuple[str, float, int, float, bool]] = [
-        ("5/9 at 0.60", 0.60, 5, _confidence(0.60, 5), _confidence(0.60, 5) >= 0.10),
-        ("6/9 at 0.60", 0.60, 6, _confidence(0.60, 6), _confidence(0.60, 6) >= 0.10),
-        ("7/9 at 0.55", 0.55, 7, _confidence(0.55, 7), _confidence(0.55, 7) >= 0.10),
-        ("5/9 at 0.62", 0.62, 5, _confidence(0.62, 5), _confidence(0.62, 5) >= 0.10),
-        ("4/9 at 0.60", 0.60, 4, _confidence(0.60, 4), _confidence(0.60, 4) >= 0.10),
-        ("5/9 bear at 0.40", 0.40, 4, _confidence(0.40, 4), _confidence(0.40, 4) >= 0.10),
-        ("6/9 bear at 0.40", 0.40, 3, _confidence(0.40, 3), _confidence(0.40, 3) >= 0.10),
+        ("2/9 at 0.55", 0.55, 2, _confidence(0.55, 2), _confidence(0.55, 2) >= 0.01),
+        ("5/9 at 0.55", 0.55, 5, _confidence(0.55, 5), _confidence(0.55, 5) >= 0.01),
+        ("7/9 at 0.55", 0.55, 7, _confidence(0.55, 7), _confidence(0.55, 7) >= 0.01),
+        ("2/9 bear at 0.45", 0.45, 7, _confidence(0.45, 7), _confidence(0.45, 7) >= 0.01),
+        ("5/9 bear at 0.45", 0.45, 4, _confidence(0.45, 4), _confidence(0.45, 4) >= 0.01),
     ]
-    for label, _comp, _n, conf, buys in cases:
+    for label, _comp, _n, conf, triggers in cases:
         assert conf > 0, f"{label}: confidence should be > 0"
-        flag = "BUY" if buys else "HOLD"
+        flag = "TRIGGER" if triggers else "HOLD"
         print(f"  {label:20s} → confidence={conf:.3f} → {flag}")

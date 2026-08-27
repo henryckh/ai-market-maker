@@ -156,8 +156,8 @@ def _init_llm() -> None:
         key_names=("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"),
         base_url_names=("AIMM_LLM_BASE_URL", "OPENAI_BASE_URL"),
         model_names=("AIMM_LLM_MODEL", "OPENAI_MODEL"),
-        default_base_url="https://api.deepseek.com/v1",
-        default_model="deepseek-chat",
+        default_base_url="https://api.atlascloud.ai/v1",
+        default_model="deepseek-ai/deepseek-v4-flash",
     )
     if not llm_config.api_key:
         raise ValueError(
@@ -614,8 +614,18 @@ def complete_json(
     model: str | None = None,
     temperature: float = 0.1,
     max_tokens: int = 1024,
+    tool_specs: list[Any] | None = None,
+    enable_tool_calls: bool = False,
 ) -> dict[str, Any]:
-    """Cached JSON completion with thinking disabled. Empty dict on failure."""
+    """Cached JSON completion with optional tool calling and thinking disabled.
+
+    When enable_tool_calls=True and tool_specs are provided, the LLM can call
+    registered screening tools (RSI, EMA, VCP, etc.) during reasoning before
+    producing its final JSON output. Tool events are included in the returned dict
+    under the _tool_events key (call sites should pop this for audit).
+
+    Returns empty dict on failure.
+    """
     try:
         client = _get_client()
     except ValueError as e:
@@ -636,6 +646,47 @@ def complete_json(
             return out
 
     model_name = model or get_default_model()
+
+    # ---- Tool-calling path ----
+    tool_events: list[dict[str, Any]] = []
+    if enable_tool_calls and tool_specs:
+        try:
+            from llm.openai_client import run_tool_calling_chat
+
+            final_text, t_events = run_tool_calling_chat(
+                system=system
+                + "\n\nAfter exploring with tools, return a single JSON object with your analysis. No markdown fences, no preamble.",
+                user=user,
+                tool_specs=tool_specs,
+                model=model_name,
+                temperature=temperature,
+                max_tool_rounds=3,
+                max_tokens=max_tokens,
+            )
+            tool_events = t_events
+            obj = _parse_llm_json(final_text)
+            if not obj:
+                logger.warning(
+                    "agent_llm: tool-call path produced unparseable output for %s, falling back snippet=%r",
+                    cache_id,
+                    final_text[:240],
+                )
+                # Fall through to non-tool path
+        except Exception as e:
+            logger.warning("agent_llm: tool-calling failed for %s, falling back: %s", cache_id, e)
+            obj = {}
+
+        if obj and tool_events:
+            obj["_tool_events"] = tool_events
+            write_fn = cache.get("write")
+            if write_fn:
+                try:
+                    write_fn(cache_id, ticker_s, date_tag, prompt_hash, obj)
+                except Exception as e:
+                    logger.debug("agent_llm: cache write failed: %s", e)
+            return obj
+
+    # ---- Standard (non-tool) path ----
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -704,6 +755,10 @@ def infer_agent(
 
     **No fallback to deterministic.** If the LLM call fails, an error
     contract with neutral values is returned (source: error).
+
+    When screening tools are available, they are offered to the LLM for
+    on-demand RSI, EMA cross, VCP detection, and volume profile analysis.
+    Tool calls are cached for reproducible backtests.
     """
     try:
         _get_client()
@@ -722,6 +777,24 @@ def infer_agent(
         agent_id=agent_id,
     )
     system, user = _build_agent_prompt(agent_id, persona, skill, market_context)
+
+    # ---- Resolve screening tools for this agent ----
+    tool_specs: list[Any] = []
+    enable_tools = os.getenv("AIMM_AGENT_TOOL_CALLS", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if enable_tools:
+        try:
+            from llm.tool_registry import TOOL_REGISTRY
+
+            tool_specs = TOOL_REGISTRY.all()
+            logger.debug("agent_llm: offering %d tools to %s", len(tool_specs), agent_id)
+        except Exception as e:
+            logger.debug("agent_llm: tool registry unavailable for %s: %s", agent_id, e)
+
     obj = complete_json(
         cache_id=agent_id,
         system=system,
@@ -731,11 +804,14 @@ def infer_agent(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+        tool_specs=tool_specs if tool_specs else None,
+        enable_tool_calls=bool(tool_specs),
     )
     if not obj:
         return _error_contract(agent_id, "unparseable LLM response")
 
     cached = bool(obj.pop("cached", False))
+    tool_events = obj.pop("_tool_events", None) or []
     result = _fill_missing_fields(obj, agent_id)
     result["agent"] = agent_id
     result["agent_id"] = agent_id
@@ -743,6 +819,9 @@ def infer_agent(
     result["source"] = "agent_llm"
     result["llm_enabled"] = True
     result["cached"] = cached
+    if tool_events:
+        result["_tool_events"] = tool_events
+        logger.info("agent_llm: %s used %d tool calls", agent_id, len(tool_events))
     return result
 
 
@@ -755,8 +834,12 @@ def infer_arbitrator_decision(
     """LLM overlay on the weighted math decision. Empty/invalid → source error."""
     system = (
         "You are the signal arbitrator for an agentic crypto hedge fund.\n"
-        "Deterministic math already produced a composite, confidence, and gate result.\n"
-        "You may confirm or override the trade decision.\n"
+        "Deterministic math equipped with neutral permissive thresholds already produced "
+        "a composite score, confidence, and consensus data from all agent desks.\n"
+        "You are the real decision-maker. Assess the regime (bull/bear/sideways) from "
+        "the desk scores and the ticker context, then decide BUY, SELL, or HOLD.\n"
+        "In a bear market, prefer SELL signals. In a bull market, prefer BUY signals.\n"
+        "In a sideways/choppy market, err toward HOLD.\n"
         'Return ONLY JSON: {"action": "BUY"|"SELL"|"HOLD", '
         '"stance": "bullish"|"bearish"|"neutral", '
         '"confidence": number 0-1, "reasons": [string, ...]}.'

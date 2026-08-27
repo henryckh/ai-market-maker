@@ -433,10 +433,10 @@ def compute_global_weighted_score(
     confidence = magnitude * min(1.0, 0.5 + consensus_ratio * 0.5)
     confidence = _clamp(confidence)
 
-    # Final stance
-    if composite >= 0.53:
+    # Final stance (neutral permissive: 2-point dead zone)
+    if composite >= 0.51:
         stance = "bullish"
-    elif composite <= 0.47:
+    elif composite <= 0.49:
         stance = "bearish"
     else:
         stance = "neutral"
@@ -481,13 +481,13 @@ def compute_weighted_arbitration(
     stance = global_score["stance"]
     consensus_ratio = global_score["consensus_ratio"]
 
-    # Default thresholds (v4 config)
+    # Default thresholds (neutral, permissive — LLM arbitrator is the real gate)
     thr_buy = decision_threshold.get("buy", {}) if decision_threshold else {}
     thr_sell = decision_threshold.get("sell", {}) if decision_threshold else {}
-    min_composite_buy = _f(thr_buy.get("min_composite", 60), 60.0) / 100.0
-    min_conf_buy = _f(thr_buy.get("min_confidence", 50), 50.0) / 100.0
-    max_composite_sell = _f(thr_sell.get("max_composite", 40), 40.0) / 100.0
-    min_conf_sell = _f(thr_sell.get("min_confidence", 50), 50.0) / 100.0
+    min_composite_buy = _f(thr_buy.get("min_composite", 51), 51.0) / 100.0
+    min_conf_buy = _f(thr_buy.get("min_confidence", 1), 1.0) / 100.0
+    max_composite_sell = _f(thr_sell.get("max_composite", 49), 49.0) / 100.0
+    min_conf_sell = _f(thr_sell.get("min_confidence", 1), 1.0) / 100.0
 
     # Decision gate
     buy_triggered = (
@@ -499,7 +499,7 @@ def compute_weighted_arbitration(
     hold_triggered = not buy_triggered and not sell_triggered
 
     # Alignment gating: require min_factors_for_directional
-    min_factors = 3
+    min_factors = 1
     if decision_threshold and "alignment_gating" in decision_threshold:
         ag = decision_threshold["alignment_gating"]
         if isinstance(ag, dict):
@@ -531,9 +531,9 @@ def compute_weighted_arbitration(
         ta_id = str(ta_led.get("agent_id") or "technical_ta_engine")
         ta_sig = next((s for s in enabled_sigs if s.agent_id == ta_id), None)
         if ta_sig is not None:
-            buy_min_ta = _f(ta_led.get("buy_min_composite", 57), 57.0) / 100.0
-            sell_max_ta = _f(ta_led.get("sell_max_composite", 43), 43.0) / 100.0
-            ta_min_conf = _f(ta_led.get("min_confidence", 14), 14.0) / 100.0
+            buy_min_ta = _f(ta_led.get("buy_min_composite", 51), 51.0) / 100.0
+            sell_max_ta = _f(ta_led.get("sell_max_composite", 49), 49.0) / 100.0
+            ta_min_conf = _f(ta_led.get("min_confidence", 1), 1.0) / 100.0
             ta_conf = max(confidence, ta_sig.confidence)
             if (
                 not block_long

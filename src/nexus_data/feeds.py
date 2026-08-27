@@ -21,6 +21,12 @@ def nexus_credentials_configured() -> bool:
 
 
 def nexus_feeds_enabled() -> bool:
+    # NEXUS_PROVIDER_MODE=remote → feeds are served by datalayer-api historical snapshots
+    if (os.getenv("NEXUS_PROVIDER_MODE") or "").strip().lower() == "remote":
+        return True
+    # AIMM_NEXUS_MODE=historical → backtest with historical provider (remote or CSV)
+    if (os.getenv("AIMM_NEXUS_MODE") or "").strip().lower() == "historical":
+        return True
     if (os.getenv("NEXUS_DISABLE") or "").lower() in ("1", "true", "yes"):
         return False
     return nexus_credentials_configured()

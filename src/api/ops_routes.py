@@ -84,6 +84,13 @@ class OpsBacktestRequest(BaseModel):
     seed: int | None = Field(None, ge=0)
     fee_bps: float = Field(10.0, ge=0, le=500)
     initial_cash: float = Field(1000.0, gt=0)
+    deploy: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Inline deploy from builder (agents+execution preferred; "
+            "legacy profile_weights+arbitrator_mode accepted)."
+        ),
+    )
 
 
 @router.post("/backtests/quick")
@@ -113,6 +120,7 @@ def post_ops_quick_backtest_async(req: OpsBacktestRequest) -> dict[str, Any]:
         seed=req.seed,
         fee_bps=req.fee_bps,
         initial_cash=req.initial_cash,
+        deploy=req.deploy,
     )
     return post_quick_backtest_async(q)
 

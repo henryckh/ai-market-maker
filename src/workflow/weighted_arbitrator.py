@@ -35,22 +35,25 @@ from workflow.weight_assigner import compute_weighted_arbitration
 
 logger = logging.getLogger(__name__)
 
-# Default gates when deploy JSON omits decision_threshold (macro_tilt research profile).
+# Neutral permissive fallback thresholds — intentionally wide-open.
+# The LLM arbitrator (when enabled) is the real decision-maker, receiving all
+# agent scores and assessing regime.  When LLM is disabled, the wide gates let
+# the composite signal through without static long/short bias.
 _V4_DECISION_THRESHOLD: dict[str, Any] = {
-    "buy": {"min_composite": 53, "min_confidence": 16},
-    "sell": {"max_composite": 41, "min_confidence": 26},
+    "buy": {"min_composite": 51, "min_confidence": 1},
+    "sell": {"max_composite": 49, "min_confidence": 1},
     "hold": {"else": True},
     "alignment_gating": {
         "enabled": True,
-        "min_factors_for_directional": 2,
+        "min_factors_for_directional": 1,
         "risk_override_if_blocked": True,
     },
     "ta_led": {
         "enabled": True,
         "agent_id": "technical_ta_engine",
-        "buy_min_composite": 57,
-        "sell_max_composite": 43,
-        "min_confidence": 14,
+        "buy_min_composite": 51,
+        "sell_max_composite": 49,
+        "min_confidence": 1,
     },
 }
 
@@ -249,9 +252,6 @@ def _apply_llm_arbitration(
     action = str(overlay.get("action") or "HOLD").upper()
     reasons = list(result.reasons)
     reasons.extend(str(r) for r in (overlay.get("reasons") or []) if r)
-    if result.alignment_gated and action in ("BUY", "SELL"):
-        reasons.append("alignment_gated: LLM directional blocked")
-        action = "HOLD"
     stance = str(overlay.get("stance") or result.stance)
     conf = float(
         overlay.get("confidence") if overlay.get("confidence") is not None else result.confidence
@@ -435,6 +435,27 @@ def weighted_arbitrator_node(state: HedgeFundState) -> dict[str, Any]:
         meta = dict(proposed_signal.get("meta") or {})
         meta["source"] = "weighted_arbitrator+llm"
         proposed_signal["meta"] = meta
+
+    # ---- Collect tool events from LLM agent contracts for audit trail ----
+    all_tool_events: list[dict[str, Any]] = []
+    for c in state.get("tier0_contracts") or []:
+        if not isinstance(c, dict):
+            continue
+        te = c.get("_tool_events")
+        if isinstance(te, list) and te:
+            for evt in te:
+                if isinstance(evt, dict):
+                    all_tool_events.append(evt)
+    if all_tool_events:
+        params = dict(proposed_signal.get("params") or {})
+        params["tool_events"] = all_tool_events
+        proposed_signal["params"] = params
+        logger.info(
+            "agent_llm: collected %d tool events across %d agents",
+            len(all_tool_events),
+            len(state.get("tier0_contracts") or []),
+        )
+
     intent = derive_trade_intent(state, proposed_signal)
 
     compact = _compact_arbitration_for_reasoning(result)

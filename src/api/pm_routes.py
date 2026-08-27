@@ -437,7 +437,12 @@ def post_pm_ask(run_id: str, req: AskRequest) -> AskResponse:
     run_dir = _resolve_backtest_dir(run_id)
     snap = _build_snapshot(run_dir)
     ans = _llm_supervisor_answer(snap, question=req.question, max_tokens=int(req.max_tokens))
-    model = os.getenv("AIMM_LLM_MODEL") or os.getenv("OPENAI_MODEL") or None
+    model = (
+        os.getenv("AIMM_LLM_MODEL")
+        or os.getenv("OPENAI_MODEL")
+        or os.getenv("ATLASCLOUD_MODEL")
+        or None
+    )
     return AskResponse(
         run_id=str(snap.get("run_id") or run_id), question=req.question, answer=ans, model=model
     )
@@ -466,7 +471,12 @@ def post_pm_run_ask(run_id: str, req: AskRequest) -> AskResponse:
         )
     snap = _build_run_snapshot(run_id)
     ans = _llm_supervisor_answer(snap, question=req.question, max_tokens=int(req.max_tokens))
-    model = os.getenv("AIMM_LLM_MODEL") or os.getenv("OPENAI_MODEL") or None
+    model = (
+        os.getenv("AIMM_LLM_MODEL")
+        or os.getenv("OPENAI_MODEL")
+        or os.getenv("ATLASCLOUD_MODEL")
+        or None
+    )
     return AskResponse(
         run_id=str(snap.get("run_id") or run_id), question=req.question, answer=ans, model=model
     )

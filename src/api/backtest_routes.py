@@ -62,7 +62,7 @@ def _max_api_steps() -> int:
 
 def _job_stale_sec() -> int:
     """No progress for this long → treat job as dead (LLM hang or killed worker)."""
-    return max(60, int(os.environ.get("BACKTEST_JOB_STALE_SEC", "240")))
+    return max(60, int(os.environ.get("BACKTEST_JOB_STALE_SEC", "1800")))
 
 
 def _run_dir(run_id: str) -> Path:
@@ -198,7 +198,7 @@ def recover_stale_backtest_jobs(*, reason: str = "api_startup") -> int:
             continue
         if not isinstance(job, dict):
             continue
-        if str(job.get("status") or "") not in ("running", "queued"):
+        if str(job.get("status") or "") != "running":
             continue
         _fail_job(
             d.name,
@@ -253,6 +253,12 @@ def _normalize_equity_point(row: dict[str, Any], idx: int) -> dict[str, Any]:
         out["close"] = row.get("close")
     if row.get("vetoed") is not None:
         out["vetoed"] = row.get("vetoed")
+    pos = row.get("positions")
+    if isinstance(pos, (int, float)):
+        out["positions"] = int(pos)
+    u = row.get("unrealized_pnl")
+    if isinstance(u, (int, float)):
+        out["unrealized_pnl"] = float(u)
     return out
 
 
@@ -355,6 +361,15 @@ class QuickBacktestRequest(BaseModel):
         None,
         description="ccxt_range: ISO date/datetime (UTC) for range end, e.g. 2024-01-01.",
     )
+    # Optional strategy overrides from the builder: desk weights, arbitrator mode.
+    deploy: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Inline deploy from aimm-web builder. Prefer full agents+execution "
+            "(deploy.active.json shape); legacy profile_weights+arbitrator_mode still work. "
+            "Does NOT write deploy.active.json."
+        ),
+    )
 
 
 class DemoBacktestRequest(BaseModel):
@@ -381,6 +396,23 @@ class DemoBacktestRequest(BaseModel):
     fee_bps: float = Field(10.0, ge=0, le=500)
 
 
+class StrategyBacktestRequest(BaseModel):
+    """Multi-tenant backtest: inline deploy JSON, never writes config/deploy.active.json."""
+
+    user_id: str = ""
+    strategy_id: str = ""
+    ticker: str = Field("BTC/USDT", min_length=3)
+    symbols: str = ""
+    n_bars: int = Field(180, ge=20, le=100_000)
+    interval_sec: int = Field(3600, ge=60, le=86_400)
+    initial_cash: float = Field(10_000.0, gt=0)
+    fee_bps: float = Field(5.0, ge=0, le=500)
+    exchange_id: str = "binance"
+    since_iso: str | None = None
+    until_iso: str | None = None
+    deploy: dict[str, Any]
+
+
 def _until_ms_inclusive(until_iso: str) -> int:
     """UTC ms end bound; date-only values include the full calendar day."""
     raw = (until_iso or "").strip()
@@ -388,6 +420,83 @@ def _until_ms_inclusive(until_iso: str) -> int:
     if "T" not in raw and len(raw) <= 10:
         return until_ms + 86_400_000 - 1
     return until_ms
+
+
+def _merge_inline_deploy_overrides(cfg: dict[str, Any], deploy: dict[str, Any]) -> None:
+    """Merge aimm-web / tenant inline deploy into resolved backtest cfg in-place.
+
+    Preferred shape (matches config/deploy.*.json)::
+
+        { "agents": { "<desk>": {"weight", "enabled", "llm_enabled"}, ... },
+          "execution": {...}, "decision_threshold": {...}, "arbitrator_mode": "..." }
+
+    Legacy shape (profile_weights + arbitrator_mode only) still accepted.
+    """
+    agents = deploy.get("agents")
+    if isinstance(agents, dict) and agents:
+        cfg["agents"] = dict(agents)
+        weights: dict[str, float] = {}
+        for name, meta in agents.items():
+            if not isinstance(meta, dict) or meta.get("enabled", True) is False:
+                continue
+            try:
+                w = float(meta.get("weight") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if w > 0:
+                weights[str(name)] = w
+        if weights:
+            cfg["profile_weights"] = weights
+
+    pw = deploy.get("profile_weights")
+    if isinstance(pw, dict) and pw and not isinstance(agents, dict):
+        # Legacy builder: weights only, no agents block
+        cfg["profile_weights"] = {str(k): float(v) for k, v in pw.items() if float(v) > 0}
+
+    exec_cfg = deploy.get("execution")
+    if isinstance(exec_cfg, dict) and exec_cfg:
+        prev_exec = cfg.get("execution") if isinstance(cfg.get("execution"), dict) else {}
+        cfg["execution"] = {**prev_exec, **dict(exec_cfg)}
+        if exec_cfg.get("allows_short") is not None:
+            cfg["allows_short"] = bool(exec_cfg.get("allows_short"))
+        for src_key, dst_key, cast in (
+            ("leverage", "leverage", float),
+            ("take_profit_pct", "take_profit_pct", float),
+            ("stop_loss_pct", "stop_loss_pct", float),
+            ("max_position", "max_position", float),
+            ("slippage_bps", "slippage_bps", float),
+            ("max_hold_bars", "max_hold_bars", int),
+        ):
+            if exec_cfg.get(src_key) is None:
+                continue
+            try:
+                cfg[dst_key] = cast(exec_cfg[src_key])  # type: ignore[operator]
+            except (TypeError, ValueError):
+                pass
+        use_llm = exec_cfg.get("use_llm_synthesis")
+        if use_llm is None:
+            use_llm = bool(exec_cfg.get("arbitrator_llm"))
+        if use_llm:
+            cfg["arbitrator_mode"] = "agent_llm"
+            cfg["use_llm"] = True
+        elif exec_cfg.get("use_llm_synthesis") is False and exec_cfg.get("arbitrator_llm") is False:
+            # Explicit non-LLM deploy from builder — do not inherit agent_llm from file defaults
+            cfg["use_llm"] = False
+            if not deploy.get("arbitrator_mode"):
+                cfg["arbitrator_mode"] = "weighted_convergence"
+
+    dt = deploy.get("decision_threshold")
+    if isinstance(dt, dict) and dt:
+        cfg["decision_threshold"] = dict(dt)
+
+    am = deploy.get("arbitrator_mode")
+    if isinstance(am, str) and am.strip():
+        mode = am.strip().lower()
+        cfg["arbitrator_mode"] = mode
+        if mode in ("agent_llm", "llm", "full_agentic"):
+            cfg["use_llm"] = True
+        elif mode in ("weighted_convergence", "weighted"):
+            cfg["use_llm"] = False
 
 
 def _execute_quick_backtest(
@@ -399,6 +508,11 @@ def _execute_quick_backtest(
     deploy_path: str | None = None,
 ) -> dict[str, Any]:
     cfg = resolve_backtest_config(deploy_path=deploy_path)
+    # Merge inline deploy from aimm-web Strategy Builder / tenant clients.
+    # Accepts full deploy.active.json shape (agents + execution), not only
+    # legacy profile_weights. Does NOT write deploy.active.json.
+    if req.deploy and isinstance(req.deploy, dict):
+        _merge_inline_deploy_overrides(cfg, req.deploy)
     set_env_from_config(cfg)
     cap = _max_api_steps()
     tf = interval_sec_to_ccxt_timeframe(int(req.interval_sec))
@@ -538,9 +652,10 @@ def _execute_quick_backtest(
         deploy_profile_weights=cfg.get("profile_weights") or None,
         deploy_profile_id=cfg.get("profile_id") or None,
         deploy_arbitrator_mode=cfg.get("arbitrator_mode") or None,
-        take_profit_pct=cfg.get("take_profit_pct", 0.0),
-        stop_loss_pct=cfg.get("stop_loss_pct", 0.0),
-        max_hold_bars=cfg.get("max_hold_bars", 0),
+        leverage=float(cfg["leverage"]) if cfg.get("leverage") is not None else None,
+        take_profit_pct=float(cfg.get("take_profit_pct") or 0.0),
+        stop_loss_pct=float(cfg.get("stop_loss_pct") or 0.0),
+        max_hold_bars=int(cfg.get("max_hold_bars") or 0),
     )
     logger.info(
         "backtest done run_id=%s trade_count=%s final_equity=%s",
@@ -672,6 +787,160 @@ def _execute_demo_backtest(
     if strategy:
         out["strategy"] = strategy
     return out
+
+
+def _deploy_is_agentic(deploy: dict[str, Any]) -> bool:
+    exec_cfg = deploy.get("execution") if isinstance(deploy.get("execution"), dict) else {}
+    if exec_cfg.get("use_llm_synthesis") or exec_cfg.get("arbitrator_llm"):
+        return True
+    agents = deploy.get("agents") if isinstance(deploy.get("agents"), dict) else {}
+    return any(
+        isinstance(meta, dict)
+        and meta.get("llm_enabled")
+        and meta.get("enabled", True) is not False
+        for meta in agents.values()
+    )
+
+
+def _embedded_worker_enabled() -> bool:
+    v = (os.getenv("AIMM_BACKTEST_WORKER_EMBEDDED") or "1").strip().lower()
+    return v not in {"0", "false", "no", "off"}
+
+
+_AGENTIC_SEM = threading.Semaphore(max(1, int(os.getenv("AIMM_BACKTEST_MAX_AGENTIC", "2"))))
+_DET_SEM = threading.Semaphore(max(1, int(os.getenv("AIMM_BACKTEST_MAX_DETERMINISTIC", "8"))))
+
+
+def execute_queued_backtest_job(run_id: str) -> None:
+    """Run a previously enqueued /backtests/run job (API thread or external worker)."""
+    rid = require_safe_id(str(run_id), name="run_id")
+    job = {}
+    p = _job_path(rid)
+    if p.is_file():
+        try:
+            loaded = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                job = loaded
+        except Exception:
+            job = {}
+    payload = job.get("request") if isinstance(job.get("request"), dict) else {}
+    deploy_path = str(job.get("deploy_path") or "")
+    if str(job.get("status") or "") not in ("queued", "claimed"):
+        return
+    if not deploy_path or not Path(deploy_path).is_file():
+        _fail_job(rid, job, error="Missing per-run deploy.json")
+        return
+    job["status"] = "claimed"
+    _write_job(rid, job)
+
+    agentic = bool(job.get("agentic"))
+    sem = _AGENTIC_SEM if agentic else _DET_SEM
+
+    def on_bar(i: int, total: int, snap: dict[str, Any]) -> None:
+        _job_progress_update(rid, i, total, snap)
+
+    sem.acquire()
+    try:
+        from config.deploy_context import thread_deploy_path
+        from llm.usage import reset_usage, snapshot_usage
+
+        BACKTEST_JOBS[rid] = {**job, "status": "running"}
+        _write_job(rid, dict(BACKTEST_JOBS[rid]))
+        reset_usage()
+        symbols = str(payload.get("symbols") or "")
+        syms = [s.strip() for s in symbols.split(",") if s.strip()]
+        with thread_deploy_path(deploy_path):
+            if len(syms) >= 2:
+                demo = DemoBacktestRequest(
+                    symbols=",".join(syms),
+                    steps=int(payload.get("n_bars") or 180),
+                    interval_sec=int(payload.get("interval_sec") or 3600),
+                    exchange_id=str(payload.get("exchange_id") or "binance"),
+                    initial_cash=float(payload.get("initial_cash") or 10_000),
+                    fee_bps=float(payload.get("fee_bps") or 5),
+                )
+                out = _execute_demo_backtest(
+                    demo, run_id=rid, on_bar_complete=on_bar, deploy_path=deploy_path
+                )
+            else:
+                q = QuickBacktestRequest(
+                    ticker=str(payload.get("ticker") or "BTC/USDT"),
+                    n_bars=int(payload.get("n_bars") or 180),
+                    interval_sec=int(payload.get("interval_sec") or 3600),
+                    initial_cash=float(payload.get("initial_cash") or 10_000),
+                    fee_bps=float(payload.get("fee_bps") or 5),
+                    exchange_id=str(payload.get("exchange_id") or "binance"),
+                    since_iso=payload.get("since_iso"),
+                    until_iso=payload.get("until_iso"),
+                )
+                out = _execute_quick_backtest(
+                    q, run_id=rid, on_bar_complete=on_bar, deploy_path=deploy_path
+                )
+        out["usage"] = snapshot_usage()
+        BACKTEST_JOBS[rid] = {"status": "completed", "result": out, "usage": out["usage"]}
+        _write_job(rid, dict(BACKTEST_JOBS[rid]))
+    except HTTPException as e:
+        detail = e.detail
+        _fail_job(rid, job, error=detail if isinstance(detail, str) else str(detail))
+    except Exception as e:
+        logger.exception("queued backtest failed run_id=%s", rid)
+        _fail_job(rid, job, error=str(e))
+    finally:
+        sem.release()
+
+
+def iter_queued_backtest_ids(*, limit: int = 8) -> list[str]:
+    if not BACKTESTS_DIR.is_dir():
+        return []
+    out: list[str] = []
+    for d in sorted(BACKTESTS_DIR.iterdir(), key=lambda p: p.stat().st_mtime if p.exists() else 0):
+        if not d.is_dir():
+            continue
+        p = d / "job.json"
+        if not p.is_file():
+            continue
+        try:
+            job = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (
+            isinstance(job, dict)
+            and str(job.get("status") or "") == "queued"
+            and job.get("deploy_path")
+        ):
+            out.append(d.name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+@router.post("/backtests/run")
+def post_strategy_backtest_run(req: StrategyBacktestRequest) -> dict[str, Any]:
+    """Enqueue a tenant-isolated backtest with inline deploy JSON."""
+    if not isinstance(req.deploy, dict) or not req.deploy.get("agents"):
+        raise HTTPException(status_code=400, detail="deploy.agents is required")
+
+    from api.tenant_deploy import write_tenant_deploy
+
+    rid = f"bt-{uuid.uuid4().hex[:12]}"
+    deploy_path = write_tenant_deploy(deploy=req.deploy, run_id=rid, user_id=req.user_id or "anon")
+    agentic = _deploy_is_agentic(req.deploy)
+    BACKTEST_JOBS[rid] = {
+        "status": "queued",
+        "step": 0,
+        "total_steps": 0,
+        "trade_count": 0,
+        "equity": None,
+        "user_id": req.user_id,
+        "strategy_id": req.strategy_id,
+        "deploy_path": str(deploy_path),
+        "agentic": agentic,
+        "request": req.model_dump(),
+    }
+    _write_job(rid, dict(BACKTEST_JOBS[rid]))
+    if _embedded_worker_enabled():
+        threading.Thread(target=execute_queued_backtest_job, args=(rid,), daemon=True).start()
+    return {"run_id": rid, "poll": f"/backtests/jobs/{rid}", "agentic": agentic}
 
 
 @router.post("/backtests/quick")
@@ -1227,6 +1496,18 @@ def get_backtest_iterations(
         "total_returned": len(rows),
         "iterations": rows,
     }
+
+
+@router.get("/backtests/{run_id}/attribution")
+def get_backtest_attribution(run_id: str) -> dict[str, Any]:
+    """Return P&L attribution summary — desk-level, symbol-level, Sharpe per desk."""
+    att_summary = _run_dir(run_id) / "attribution_summary.json"
+    if not att_summary.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="attribution_summary.json not found — ensure agentic_batch mode is enabled",
+        )
+    return json.loads(att_summary.read_text(encoding="utf-8"))
 
 
 @router.get("/backtests/{run_id}/bars")

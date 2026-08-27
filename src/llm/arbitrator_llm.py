@@ -314,7 +314,10 @@ def signal_arbitrator_llm(state: HedgeFundState) -> Dict[str, Any]:
         allow = {str(x) for x in ps.tools if str(x).strip()}
         specs = [s for s in specs if s.name in allow or s.wire_name in allow]
     model_name = (
-        (ps.model if ps is not None else None) or os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+        (ps.model if ps is not None else None)
+        or os.getenv("OPENAI_MODEL")
+        or os.getenv("ATLASCLOUD_MODEL")
+        or "gpt-4o-mini"
     )
     retries = clamp_int(llm_output_retries(), lo=0, hi=5)
     strict_json = llm_strict_json_enabled()

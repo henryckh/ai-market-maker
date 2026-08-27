@@ -14,6 +14,11 @@ _DEFAULT_DEPLOY_PATH = "config/deploy.active.json"
 
 
 def _deploy_path() -> Path:
+    from config.deploy_context import get_thread_deploy_path
+
+    thread_path = get_thread_deploy_path()
+    if thread_path:
+        return Path(thread_path)
     override = (os.getenv("AIMM_DEPLOY_CONFIG_PATH") or "").strip()
     return Path(override) if override else Path(_DEFAULT_DEPLOY_PATH)
 
