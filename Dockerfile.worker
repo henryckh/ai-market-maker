@@ -3,7 +3,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src
 
 RUN pip install --no-cache-dir uv
 
@@ -23,5 +24,5 @@ RUN chmod +x /app/docker/api-entrypoint.sh
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-deps -e .
 
-CMD ["python", "scripts/run_platform_worker.py"]
+CMD ["python", "-m", "api.backtest_worker"]
 
