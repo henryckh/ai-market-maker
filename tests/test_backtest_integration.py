@@ -62,28 +62,30 @@ def _mock_signal_fn(symbol, window, positions, capital) -> float:
 
 @pytest.mark.skipif(_SKIP, reason="BacktestEngine not importable")
 class TestBacktestExportBundle:
+    _ENGINE_CFG = {
+        "initial_cash_usd": 10000.0,
+        "fee_bps": 0.0,
+        "slippage_bps": 0.0,
+        "interval_sec": 86400,
+        "instrument": "perp",
+        "leverage": 1.0,
+        "export_bundle": True,
+        "take_profit_pct": 0.0,
+        "stop_loss_pct": 0.0,
+        "max_hold_bars": 10,
+        "timeframe": "1d",
+        "min_warmup_bars": 0,
+        "ta_warmup_bars": 0,
+        "use_llm": False,
+        "arbitrator_mode": "weighted_convergence",
+        "deploy_profile_weights": {"technical_ta_engine": 1.0},
+    }
+
     def test_3_bar_backtest_bundle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             bars = _make_bars(10)
-            engine = BacktestEngine(
-                {
-                    "initial_cash_usd": 10000.0,
-                    "fee_bps": 0.0,
-                    "slippage_bps": 0.0,
-                    "interval_sec": 86400,
-                    "instrument": "perp",
-                    "leverage": 1.0,
-                    "runs_dir": str(tmp),
-                    "export_bundle": True,
-                    "take_profit_pct": 0.0,
-                    "stop_loss_pct": 0.0,
-                    "max_hold_bars": 10,
-                    "timeframe": "1d",
-                    "min_warmup_bars": 0,
-                    "ta_warmup_bars": 0,
-                }
-            )
+            engine = BacktestEngine(dict(self._ENGINE_CFG, runs_dir=str(tmp)))
             engine.run(
                 "BTC/USDT",
                 bars=bars,
@@ -141,22 +143,7 @@ class TestBacktestExportBundle:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             bars = _make_bars(5)
-            engine = BacktestEngine(
-                {
-                    "initial_cash_usd": 10000.0,
-                    "fee_bps": 0.0,
-                    "slippage_bps": 0.0,
-                    "interval_sec": 86400,
-                    "instrument": "perp",
-                    "leverage": 1.0,
-                    "runs_dir": str(tmp),
-                    "export_bundle": True,
-                    "take_profit_pct": 0.0,
-                    "stop_loss_pct": 0.0,
-                    "max_hold_bars": 10,
-                    "timeframe": "1d",
-                }
-            )
+            engine = BacktestEngine(dict(self._ENGINE_CFG, runs_dir=str(tmp)))
             engine.run(
                 "BTC/USDT",
                 bars=bars,

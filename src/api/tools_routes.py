@@ -43,7 +43,7 @@ def _tool_registry() -> list[ToolDef]:
                 "interval_sec": 3600,
                 "n_bars": 200,
                 "fee_bps": 5,
-                "initial_cash": 10000,
+                "initial_cash": 100000,
                 "agent_ids": ["n4", "n9", "n12"],
                 "max_steps": 200,
             },

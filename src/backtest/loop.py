@@ -59,7 +59,7 @@ def run_multi_step_backtest(
     ticker: str,
     bars: Sequence[Sequence[Any]] | None = None,
     bars_by_symbol: Mapping[str, Sequence[Sequence[Any]]] | None = None,
-    initial_cash: float = 10_000.0,
+    initial_cash: float = 100_000.0,
     initial_btc: float = 0.0,
     fee_bps: float = 10.0,
     interval_sec: int = 300,

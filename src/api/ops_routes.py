@@ -7,9 +7,10 @@ They must be safe by default, explicit, and easy to reason about.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -20,13 +21,16 @@ from api.backtest_routes import (
     _execute_quick_backtest,
     post_quick_backtest_async,
 )
+from config.runs_paths import runs_dir as _resolved_runs_dir
 from storage.leadpage_db import engine as leadpage_engine
 from storage.leadpage_db import insert_local_backtest_result_if_missing
 
-RUNS_DIR = Path(".runs")
+RUNS_DIR = _resolved_runs_dir()
 BACKTESTS_DIR = RUNS_DIR / "backtests"
 
 router = APIRouter(prefix="/ops", tags=["ops"])
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> int:
@@ -78,12 +82,24 @@ def get_selftest() -> dict[str, Any]:
 
 class OpsBacktestRequest(BaseModel):
     ticker: str = Field("BTC/USDT", min_length=3)
+    symbols: list[str] | None = Field(
+        None,
+        description="Optional multi-symbol universe for Strategy Builder (2+ symbols → multi-asset book).",
+    )
     n_bars: int = Field(300, ge=20, le=100_000)
     interval_sec: int = Field(3600, ge=60, le=86_400)
     max_steps: int | None = Field(None, ge=1)
     seed: int | None = Field(None, ge=0)
     fee_bps: float = Field(10.0, ge=0, le=500)
-    initial_cash: float = Field(1000.0, gt=0)
+    initial_cash: float = Field(100_000.0, gt=0)
+    since_iso: str | None = Field(
+        None,
+        description="UTC range start (with until_iso), e.g. 2026-01-01 — from Strategy Builder.",
+    )
+    until_iso: str | None = Field(
+        None,
+        description="UTC range end (with since_iso), e.g. 2026-06-19 — from Strategy Builder.",
+    )
     deploy: dict[str, Any] | None = Field(
         None,
         description=(
@@ -91,38 +107,82 @@ class OpsBacktestRequest(BaseModel):
             "legacy profile_weights+arbitrator_mode accepted)."
         ),
     )
+    strategy_id: str = Field(
+        "",
+        description="Strategy ID. When set, MCP cache is auto-published on completion.",
+    )
+
+
+def _to_quick(req: OpsBacktestRequest) -> QuickBacktestRequest:
+    return QuickBacktestRequest(
+        ticker=req.ticker,
+        symbols=req.symbols,
+        n_bars=req.n_bars,
+        interval_sec=req.interval_sec,
+        max_steps=req.max_steps,
+        fee_bps=req.fee_bps,
+        initial_cash=req.initial_cash,
+        since_iso=req.since_iso,
+        until_iso=req.until_iso,
+        deploy=req.deploy,
+    )
 
 
 @router.post("/backtests/quick")
 def post_ops_quick_backtest(req: OpsBacktestRequest) -> dict[str, Any]:
     """Run a quick backtest and return the same shape as `/backtests/quick`."""
 
-    q = QuickBacktestRequest(
-        ticker=req.ticker,
-        n_bars=req.n_bars,
-        interval_sec=req.interval_sec,
-        max_steps=req.max_steps,
-        seed=req.seed,
-        fee_bps=req.fee_bps,
-        initial_cash=req.initial_cash,
-    )
+    q = _to_quick(req)
     return _execute_quick_backtest(q)
 
 
 @router.post("/backtests/quick/async")
 def post_ops_quick_backtest_async(req: OpsBacktestRequest) -> dict[str, Any]:
-    """Run a quick backtest asynchronously and return a poll handle for progress."""
-    q = QuickBacktestRequest(
-        ticker=req.ticker,
-        n_bars=req.n_bars,
-        interval_sec=req.interval_sec,
-        max_steps=req.max_steps,
-        seed=req.seed,
-        fee_bps=req.fee_bps,
-        initial_cash=req.initial_cash,
-        deploy=req.deploy,
-    )
-    return post_quick_backtest_async(q)
+    """Run a quick backtest asynchronously and return a poll handle for progress.
+
+    When ``strategy_id`` is set, the MCP cache is auto-published on completion.
+    """
+    sid = (req.strategy_id or "").strip()
+    q = _to_quick(req)
+    if not sid:
+        return post_quick_backtest_async(q)
+
+    # Wrap the background thread to publish MCP cache on completion
+    rid = post_quick_backtest_async(q).get("run_id")
+    if not rid:
+        return {"run_id": rid, "poll": f"/backtests/jobs/{rid}"}
+
+    ticker = q.ticker or "BTC/USDT"
+
+    def publish_on_complete() -> None:
+        import time as _time
+
+        from api.mcp_cache import publish_strategy_run
+
+        # Wait for the backtest to finish (poll job.json)
+        for _ in range(600):
+            try:
+                p = BACKTESTS_DIR / rid / "job.json"
+                if p.is_file():
+                    job = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(job, dict) and str(job.get("status") or "") == "completed":
+                        try:
+                            publish_strategy_run(
+                                strategy_id=sid,
+                                run_id=rid,
+                                symbol=ticker,
+                            )
+                        except Exception as exc:
+                            logger.warning("MCP publish failed for %s: %s", sid, exc)
+                        return
+                    if str(job.get("status") or "") == "failed":
+                        return
+            except Exception:
+                pass
+            _time.sleep(2)
+
+    threading.Thread(target=publish_on_complete, daemon=True).start()
+    return {"run_id": rid, "poll": f"/backtests/jobs/{rid}"}
 
 
 class OpsPublishBacktestRequest(BaseModel):

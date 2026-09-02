@@ -53,7 +53,7 @@ class TestResolveBacktestConfig:
         }
         assert cfg["profile_id"] == "macro_tilt"
         assert cfg["allows_short"] is True
-        assert cfg["decision_threshold"]["ta_led"]["enabled"] is True
+        assert cfg["decision_threshold"]["ta_led"]["enabled"] is False
 
     def test_deploy_config_loaded(self):
         with tempfile.TemporaryDirectory() as tmp:

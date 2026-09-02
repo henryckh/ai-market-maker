@@ -63,8 +63,7 @@ def mcp_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MCP_API_KEYS_PATH", str(keys_path))
     monkeypatch.delenv("MCP_API_KEYS_JSON", raising=False)
     monkeypatch.delenv("MCP_CREDITS_ENABLED", raising=False)
-    monkeypatch.delenv("AIMM_WEB_API_URL", raising=False)
-    monkeypatch.delenv("AIMM_WEB_API_BASE_URL", raising=False)
+    monkeypatch.delenv("WEB_API_URL", raising=False)
     # Flow middleware still needs a key for non-/mcp paths; MCP is exempt.
     monkeypatch.setenv("AIMM_API_KEY", "test-aimm-key-for-middleware")
     yield {"runs": runs, "api_key": "test-mcp-key"}
@@ -655,7 +654,7 @@ def _seed_prior_studio_job(runs: Path, strategy_id: str = "demo-btc") -> None:
 
 def test_mcp_run_backtest_credits_unconfigured(mcp_env, monkeypatch):
     monkeypatch.setenv("MCP_CREDITS_ENABLED", "true")
-    monkeypatch.delenv("AIMM_WEB_API_URL", raising=False)
+    monkeypatch.delenv("WEB_API_URL", raising=False)
     _seed_prior_studio_job(mcp_env["runs"])
     from api.flow_stream_server import app
 
@@ -672,7 +671,7 @@ def test_mcp_run_backtest_credits_unconfigured(mcp_env, monkeypatch):
 
 def test_mcp_run_backtest_reserves_credits_when_enabled(mcp_env, monkeypatch):
     monkeypatch.setenv("MCP_CREDITS_ENABLED", "true")
-    monkeypatch.setenv("AIMM_WEB_API_URL", "http://web-api:3002")
+    monkeypatch.setenv("WEB_API_URL", "http://web-api:3002")
     _seed_prior_studio_job(mcp_env["runs"])
     attaches: list[str] = []
 
@@ -727,7 +726,7 @@ def test_mcp_run_backtest_insufficient_credits(mcp_env, monkeypatch):
     from api.mcp_credits import McpCreditsError
 
     monkeypatch.setenv("MCP_CREDITS_ENABLED", "true")
-    monkeypatch.setenv("AIMM_WEB_API_URL", "http://web-api:3002")
+    monkeypatch.setenv("WEB_API_URL", "http://web-api:3002")
     _seed_prior_studio_job(mcp_env["runs"])
     enqueued = {"n": 0}
 
@@ -763,7 +762,7 @@ def test_mcp_run_backtest_insufficient_credits(mcp_env, monkeypatch):
 
 def test_mcp_run_backtest_refunds_when_enqueue_fails(mcp_env, monkeypatch):
     monkeypatch.setenv("MCP_CREDITS_ENABLED", "true")
-    monkeypatch.setenv("AIMM_WEB_API_URL", "http://web-api:3002")
+    monkeypatch.setenv("WEB_API_URL", "http://web-api:3002")
     _seed_prior_studio_job(mcp_env["runs"])
     refunds: list[dict] = []
 
@@ -801,7 +800,7 @@ def test_mcp_run_backtest_refunds_when_enqueue_fails(mcp_env, monkeypatch):
 
 def test_mcp_get_job_refunds_failed_unstarted(mcp_env, monkeypatch):
     monkeypatch.setenv("MCP_CREDITS_ENABLED", "true")
-    monkeypatch.setenv("AIMM_WEB_API_URL", "http://web-api:3002")
+    monkeypatch.setenv("WEB_API_URL", "http://web-api:3002")
     refunds: list[dict] = []
     monkeypatch.setattr(
         "api.mcp_jobs.refund_mcp_credits",
@@ -874,7 +873,7 @@ def test_mcp_credits_http_maps_402(monkeypatch):
         def post(self, url, headers=None, json=None):
             return FakeResp()
 
-    monkeypatch.setenv("AIMM_WEB_API_URL", "http://web-api:3002")
+    monkeypatch.setenv("WEB_API_URL", "http://web-api:3002")
     monkeypatch.setenv("AIMM_API_KEY", "flow-shared")
     monkeypatch.setattr("api.mcp_credits.httpx.Client", FakeClient)
     binding = McpBinding(api_key="nxk_testkey_abcdefghij", strategy_id="demo-btc")

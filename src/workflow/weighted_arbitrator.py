@@ -252,6 +252,9 @@ def _apply_llm_arbitration(
     action = str(overlay.get("action") or "HOLD").upper()
     reasons = list(result.reasons)
     reasons.extend(str(r) for r in (overlay.get("reasons") or []) if r)
+    if result.alignment_gated and action in ("BUY", "SELL"):
+        reasons.append("alignment_gated: LLM directional blocked")
+        action = "HOLD"
     stance = str(overlay.get("stance") or result.stance)
     conf = float(
         overlay.get("confidence") if overlay.get("confidence") is not None else result.confidence

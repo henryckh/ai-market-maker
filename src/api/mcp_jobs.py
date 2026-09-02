@@ -179,7 +179,7 @@ def run_backtest_for_binding(binding: McpBinding, args: dict[str, Any]) -> dict[
         symbols=str(req.get("symbols") or ""),
         n_bars=n_bars,
         interval_sec=int(req.get("interval_sec") or 3600),
-        initial_cash=float(req.get("initial_cash") or 10_000),
+        initial_cash=float(req.get("initial_cash") or 100_000),
         fee_bps=float(req.get("fee_bps") or 5),
         exchange_id=str(req.get("exchange_id") or "binance"),
         deploy=deploy,

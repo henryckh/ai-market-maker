@@ -77,7 +77,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
   interval_sec: 3600,
   n_bars: 1000,
   fee_bps: 5,
-  initial_cash: 10_000,
+  initial_cash: 100_000,
   agent_ids: ["n0", "n4", "n9"],
   description: "",
 };

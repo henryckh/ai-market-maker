@@ -78,7 +78,7 @@ services:
       AIMM_API_KEY: ${AIMM_API_KEY:-}
       AIMM_CORS_ORIGINS: ${AIMM_CORS_ORIGINS:-}
       MCP_CREDITS_ENABLED: ${MCP_CREDITS_ENABLED:-false}
-      AIMM_WEB_API_URL: ${AIMM_WEB_API_URL:-}
+      WEB_API_URL: ${WEB_API_URL:-http://web-api:3002}
       # LLM keys duplicated here for compose variable interpolation.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}

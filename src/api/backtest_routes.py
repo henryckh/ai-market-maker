@@ -332,6 +332,14 @@ def _backtest_paths_response(result: MultiStepResult) -> dict[str, Any]:
 
 class QuickBacktestRequest(BaseModel):
     ticker: str = Field("BTC/USDT", min_length=3)
+    symbols: list[str] | None = Field(
+        None,
+        description=(
+            'Optional multi-symbol universe (e.g. ["BTC/USDT","ETH/USDT","SOL/USDT"]). '
+            "When 2+ symbols are set, OHLCV is loaded for each and the book is multi-asset; "
+            "ticker remains the primary/benchmark label (defaults to symbols[0])."
+        ),
+    )
     n_bars: int = Field(200, ge=20, le=100_000)
     interval_sec: int = Field(
         300,
@@ -339,7 +347,7 @@ class QuickBacktestRequest(BaseModel):
         le=86_400,
         description="Bar size in seconds (e.g. 300 = 5m).",
     )
-    initial_cash: float = Field(10_000.0, gt=0)
+    initial_cash: float = Field(100_000.0, gt=0)
     fee_bps: float = Field(10.0, ge=0, le=500)
     max_steps: int | None = Field(
         None,
@@ -392,7 +400,7 @@ class DemoBacktestRequest(BaseModel):
         "binance",
         description='CCXT exchange id, "yahoo", or "futu" for OpenD multi-symbol runs.',
     )
-    initial_cash: float = Field(10_000.0, gt=0)
+    initial_cash: float = Field(100_000.0, gt=0)
     fee_bps: float = Field(10.0, ge=0, le=500)
 
 
@@ -405,7 +413,7 @@ class StrategyBacktestRequest(BaseModel):
     symbols: str = ""
     n_bars: int = Field(180, ge=20, le=100_000)
     interval_sec: int = Field(3600, ge=60, le=86_400)
-    initial_cash: float = Field(10_000.0, gt=0)
+    initial_cash: float = Field(100_000.0, gt=0)
     fee_bps: float = Field(5.0, ge=0, le=500)
     exchange_id: str = "binance"
     since_iso: str | None = None
@@ -498,6 +506,82 @@ def _merge_inline_deploy_overrides(cfg: dict[str, Any], deploy: dict[str, Any]) 
         elif mode in ("weighted_convergence", "weighted"):
             cfg["use_llm"] = False
 
+    ap = deploy.get("agent_prompts")
+    if isinstance(ap, list) and ap:
+        cfg["agent_prompts"] = [dict(x) for x in ap if isinstance(x, dict)]
+
+    profile = deploy.get("profile")
+    if isinstance(profile, dict) and profile.get("profile_id"):
+        cfg["profile_id"] = str(profile.get("profile_id"))
+    elif isinstance(deploy.get("profile_id"), str) and deploy["profile_id"].strip():
+        cfg["profile_id"] = deploy["profile_id"].strip()
+
+
+_MAX_QUICK_SYMBOLS = 8
+
+
+def _normalize_quick_symbols(ticker: str, symbols: list[str] | None) -> list[str]:
+    """Dedupe universe; primary ticker first when present. Cap for API cost."""
+    primary = (ticker or "").strip()
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw in [primary, *(symbols or [])]:
+        s = str(raw or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        ordered.append(s)
+    if not ordered:
+        ordered = ["BTC/USDT"]
+    return ordered[:_MAX_QUICK_SYMBOLS]
+
+
+def _fetch_ohlcv_latest(
+    symbol: str,
+    *,
+    ex_id: str,
+    tf: str,
+    interval_sec: int,
+    fetch_limit: int,
+) -> list[list[float]]:
+    if ex_id == "futu":
+        bars = fetch_futu_ohlcv_bars(symbol, fetch_limit, interval_sec=interval_sec)
+    elif ex_id == "yahoo":
+        bars = fetch_yfinance_ohlcv_bars(symbol, fetch_limit, interval_sec=interval_sec)
+    else:
+        bars = fetch_ccxt_ohlcv_bars(symbol, fetch_limit, timeframe=tf, exchange_id=ex_id)
+    return [list(map(float, row)) for row in bars]
+
+
+def _fetch_ohlcv_range(
+    symbol: str,
+    *,
+    ex_id: str,
+    tf: str,
+    interval_sec: int,
+    fetch_since_ms: int,
+    until_ms: int,
+    max_rows: int,
+) -> list[list[float]]:
+    if ex_id == "yahoo":
+        bars = fetch_yfinance_ohlcv_bars(
+            symbol,
+            max_rows,
+            interval_sec=interval_sec,
+            since_ms=fetch_since_ms,
+            until_ms=until_ms,
+        )
+    else:
+        bars = fetch_ccxt_ohlcv_range(
+            symbol,
+            timeframe=tf,
+            since_ms=fetch_since_ms,
+            until_ms=until_ms,
+            exchange_id=ex_id,
+            max_rows=max_rows,
+        )
+    return [list(map(float, row)) for row in bars]
+
 
 def _execute_quick_backtest(
     req: QuickBacktestRequest,
@@ -526,9 +610,13 @@ def _execute_quick_backtest(
         raise HTTPException(status_code=400, detail="No steps to run after applying caps.")
 
     interval_sec = int(req.interval_sec)
+    universe = _normalize_quick_symbols(req.ticker, req.symbols)
+    primary = universe[0]
+    multi = len(universe) >= 2
     ta_warmup = 0
     eval_steps = eval_cap
-    bars: list[list[float]]
+    bars: list[list[float]] | None = None
+    bars_by_symbol: dict[str, list[list[float]]] | None = None
 
     if req.since_iso or req.until_iso:
         if not req.since_iso or not req.until_iso:
@@ -555,69 +643,104 @@ def _execute_quick_backtest(
         approx = int((until_ms - fetch_since_ms) / interval_ms) + 10
         max_rows = min(100_000, max(approx, int(req.n_bars) + warmup_plan))
 
-        if ex_id == "yahoo":
-            bars = fetch_yfinance_ohlcv_bars(
-                req.ticker,
-                max_rows,
-                interval_sec=interval_sec,
-                since_ms=fetch_since_ms,
-                until_ms=until_ms,
-            )
+        if multi:
+            raw: dict[str, list[list[float]]] = {}
+            for sym in universe:
+                series = _fetch_ohlcv_range(
+                    sym,
+                    ex_id=ex_id,
+                    tf=tf,
+                    interval_sec=interval_sec,
+                    fetch_since_ms=fetch_since_ms,
+                    until_ms=until_ms,
+                    max_rows=max_rows,
+                )
+                if len(series) < 2:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Not enough OHLCV bars in range for {sym}.",
+                    )
+                raw[sym] = series
+            aligned = align_bars_by_min_length(raw)
+            primary_bars = aligned[primary]
+            warmup_idx = split_warmup_index(primary_bars, eval_since_ms=eval_since_ms)
+            eval_available = len(primary_bars) - warmup_idx
+            if eval_available < 2:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Not enough bars after the From date to evaluate "
+                        f"(got {eval_available}; need at least 2). "
+                        "Widen the date range or pick an earlier From."
+                    ),
+                )
+            eval_steps = min(eval_available, eval_cap)
+            ta_warmup = warmup_idx
+            bars_by_symbol = {sym: rows[: warmup_idx + eval_steps] for sym, rows in aligned.items()}
         else:
-            bars = fetch_ccxt_ohlcv_range(
-                req.ticker,
-                timeframe=tf,
-                since_ms=fetch_since_ms,
+            bars = _fetch_ohlcv_range(
+                primary,
+                ex_id=ex_id,
+                tf=tf,
+                interval_sec=interval_sec,
+                fetch_since_ms=fetch_since_ms,
                 until_ms=until_ms,
-                exchange_id=ex_id,
                 max_rows=max_rows,
             )
-        if len(bars) < 2:
-            raise HTTPException(
-                status_code=400, detail="Not enough OHLCV bars in the requested range."
-            )
-        warmup_idx = split_warmup_index(bars, eval_since_ms=eval_since_ms)
-        eval_available = len(bars) - warmup_idx
-        if eval_available < 2:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Not enough bars after the From date to evaluate "
-                    f"(got {eval_available}; need at least 2). "
-                    "Widen the date range or pick an earlier From."
-                ),
-            )
-        eval_steps = min(eval_available, eval_cap)
-        ta_warmup = warmup_idx
-        bars = [list(map(float, row)) for row in bars[: warmup_idx + eval_steps]]
+            if len(bars) < 2:
+                raise HTTPException(
+                    status_code=400, detail="Not enough OHLCV bars in the requested range."
+                )
+            warmup_idx = split_warmup_index(bars, eval_since_ms=eval_since_ms)
+            eval_available = len(bars) - warmup_idx
+            if eval_available < 2:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Not enough bars after the From date to evaluate "
+                        f"(got {eval_available}; need at least 2). "
+                        "Widen the date range or pick an earlier From."
+                    ),
+                )
+            eval_steps = min(eval_available, eval_cap)
+            ta_warmup = warmup_idx
+            bars = bars[: warmup_idx + eval_steps]
     else:
         # Latest-N: fetch warmup+eval so the first N scored bars stay intact.
         fetch_limit, warmup_plan = total_fetch_bars(eval_steps=eval_cap)
-        if ex_id == "futu":
-            bars = fetch_futu_ohlcv_bars(
-                req.ticker,
-                fetch_limit,
-                interval_sec=interval_sec,
-            )
-        elif ex_id == "yahoo":
-            bars = fetch_yfinance_ohlcv_bars(
-                req.ticker,
-                fetch_limit,
-                interval_sec=interval_sec,
-            )
+        if multi:
+            raw = {}
+            for sym in universe:
+                series = _fetch_ohlcv_latest(
+                    sym,
+                    ex_id=ex_id,
+                    tf=tf,
+                    interval_sec=interval_sec,
+                    fetch_limit=fetch_limit,
+                )
+                if len(series) < 2:
+                    raise HTTPException(
+                        status_code=400, detail=f"Not enough OHLCV bars returned for {sym}."
+                    )
+                raw[sym] = series
+            aligned = align_bars_by_min_length(raw)
+            aligned_len = min((len(v) for v in aligned.values()), default=0)
+            ta_warmup = min(warmup_plan, max(0, aligned_len - 2))
+            eval_steps = min(eval_cap, max(2, aligned_len - ta_warmup))
+            bars_by_symbol = {sym: rows[: ta_warmup + eval_steps] for sym, rows in aligned.items()}
         else:
-            bars = fetch_ccxt_ohlcv_bars(
-                req.ticker,
-                fetch_limit,
-                timeframe=tf,
-                exchange_id=ex_id,
+            bars = _fetch_ohlcv_latest(
+                primary,
+                ex_id=ex_id,
+                tf=tf,
+                interval_sec=interval_sec,
+                fetch_limit=fetch_limit,
             )
-        if len(bars) < 2:
-            raise HTTPException(status_code=400, detail="Not enough OHLCV bars returned.")
-        bars = [list(map(float, row)) for row in bars]
-        ta_warmup = min(warmup_plan, max(0, len(bars) - 2))
-        eval_steps = min(eval_cap, max(2, len(bars) - ta_warmup))
-        bars = bars[: ta_warmup + eval_steps]
+            if len(bars) < 2:
+                raise HTTPException(status_code=400, detail="Not enough OHLCV bars returned.")
+            ta_warmup = min(warmup_plan, max(0, len(bars) - 2))
+            eval_steps = min(eval_cap, max(2, len(bars) - ta_warmup))
+            bars = bars[: ta_warmup + eval_steps]
 
     if run_id is not None and run_id in BACKTEST_JOBS:
         BACKTEST_JOBS[run_id].update(
@@ -629,16 +752,19 @@ def _execute_quick_backtest(
         )
         _write_job(run_id, dict(BACKTEST_JOBS[run_id]))
 
+    bar_count = min(len(v) for v in bars_by_symbol.values()) if bars_by_symbol else len(bars or [])
     logger.info(
-        "backtest quick ticker=%s bars=%s eval_steps=%s ta_warmup=%s",
-        req.ticker,
-        len(bars),
+        "backtest quick ticker=%s universe=%s bars=%s eval_steps=%s ta_warmup=%s",
+        primary,
+        universe,
+        bar_count,
         eval_steps,
         ta_warmup,
     )
     result = run_multi_step_backtest(
-        ticker=req.ticker,
-        bars=bars,
+        ticker=primary,
+        bars=None if bars_by_symbol else bars,
+        bars_by_symbol=bars_by_symbol,
         initial_cash=req.initial_cash,
         fee_bps=req.fee_bps,
         interval_sec=req.interval_sec,
@@ -674,6 +800,8 @@ def _execute_quick_backtest(
         "server_max_steps": cap,
         "ta_warmup_bars": ta_warmup,
         "eval_bars": eval_steps,
+        "symbols": universe,
+        "ticker": primary,
     }
     if result.quality_report:
         out["quality_report"] = result.quality_report
@@ -856,7 +984,7 @@ def execute_queued_backtest_job(run_id: str) -> None:
                     steps=int(payload.get("n_bars") or 180),
                     interval_sec=int(payload.get("interval_sec") or 3600),
                     exchange_id=str(payload.get("exchange_id") or "binance"),
-                    initial_cash=float(payload.get("initial_cash") or 10_000),
+                    initial_cash=float(payload.get("initial_cash") or 100_000),
                     fee_bps=float(payload.get("fee_bps") or 5),
                 )
                 out = _execute_demo_backtest(
@@ -867,7 +995,7 @@ def execute_queued_backtest_job(run_id: str) -> None:
                     ticker=str(payload.get("ticker") or "BTC/USDT"),
                     n_bars=int(payload.get("n_bars") or 180),
                     interval_sec=int(payload.get("interval_sec") or 3600),
-                    initial_cash=float(payload.get("initial_cash") or 10_000),
+                    initial_cash=float(payload.get("initial_cash") or 100_000),
                     fee_bps=float(payload.get("fee_bps") or 5),
                     exchange_id=str(payload.get("exchange_id") or "binance"),
                     since_iso=payload.get("since_iso"),
@@ -1100,7 +1228,7 @@ def post_preset_backtest(req: PresetBacktestRequest) -> dict[str, Any]:
             steps=int(merged.get("max_steps") or merged.get("n_bars") or 200),
             interval_sec=int(merged.get("interval_sec") or 86_400),
             exchange_id=str(merged.get("exchange_id") or "binance"),
-            initial_cash=float(merged.get("initial_cash") or 10_000),
+            initial_cash=float(merged.get("initial_cash") or 100_000),
             fee_bps=float(merged.get("fee_bps") or 10),
         )
         return _execute_demo_backtest(demo, deploy_path=deploy_path, strategy=strategy_meta)
@@ -1176,7 +1304,7 @@ def post_preset_backtest_async(req: PresetBacktestRequest) -> dict[str, Any]:
                     steps=int(merged.get("max_steps") or merged.get("n_bars") or 200),
                     interval_sec=int(merged.get("interval_sec") or 86_400),
                     exchange_id=str(merged.get("exchange_id") or "binance"),
-                    initial_cash=float(merged.get("initial_cash") or 10_000),
+                    initial_cash=float(merged.get("initial_cash") or 100_000),
                     fee_bps=float(merged.get("fee_bps") or 10),
                 )
                 out = _execute_demo_backtest(
@@ -1236,6 +1364,30 @@ def get_backtest_job(run_id: str) -> dict[str, Any]:
     return _maybe_fail_stale_job(rid, job)
 
 
+@router.post("/backtests/jobs/{run_id}/cancel")
+def cancel_backtest_job(run_id: str) -> dict[str, bool]:
+    """Cancel a running/queued backtest job so polls see it as failed immediately."""
+    rid = str(run_id).strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="run_id is required")
+    p = _job_path(rid)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Unknown job or run_id")
+    try:
+        job = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job file") from None
+    status = str(job.get("status") or "")
+    if status not in ("running", "queued"):
+        raise HTTPException(status_code=409, detail=f"Job is {status}, not running/queued")
+    _fail_job(rid, job, error="Cancelled by user")
+    # Also remove from in-memory tracking so the thread stops if it checks
+    if rid in BACKTEST_JOBS:
+        BACKTEST_JOBS[rid] = {"status": "cancelled", "error": "Cancelled by user"}
+    logger.info("cancelled backtest run_id=%s", rid)
+    return {"ok": True}
+
+
 @router.get("/backtests/jobs/{run_id}/stream")
 async def stream_backtest_job(run_id: str, request: Request) -> StreamingResponse:
     """Server-sent events stream of backtest job progress.
@@ -1293,7 +1445,7 @@ async def stream_backtest_job(run_id: str, request: Request) -> StreamingRespons
 
 class FileBacktestRequest(BaseModel):
     path: str = Field(..., description="Path under repo to JSON OHLCV file (server-local).")
-    initial_cash: float = Field(10_000.0, gt=0)
+    initial_cash: float = Field(100_000.0, gt=0)
     fee_bps: float = Field(10.0, ge=0, le=500)
     interval_sec: int = Field(300, ge=60, le=86_400)
     max_steps: int | None = Field(None, ge=1)

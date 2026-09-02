@@ -266,7 +266,7 @@ def _load_equity_curve(run_dir: Path, summary: dict[str, Any] | None = None) -> 
 def _load_benchmark_equity(run_dir: Path, summary: dict[str, Any]) -> tuple[str, list[float]]:
     bench = summary.get("benchmark") or {}
     label = str(bench.get("benchmark_symbol") or _PREFERRED_BENCHMARK)
-    initial = float(summary.get("initial_cash") or 10_000)
+    initial = float(summary.get("initial_cash") or 100_000)
     n_bars = int(summary.get("total_bars") or 0)
     bars_path = run_dir / "bars.json"
 
@@ -934,7 +934,7 @@ def build_backtest_report_html(run_dir: Path) -> str:
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     start_iso = str(summary.get("start_iso", equity_pts[0].date_full if equity_pts else ""))[:10]
     end_iso = str(summary.get("end_iso", equity_pts[-1].date_full if equity_pts else ""))[:10]
-    initial_cash = float(summary.get("initial_cash") or 10_000)
+    initial_cash = float(summary.get("initial_cash") or 100_000)
     final_equity = float(
         summary.get("final_equity") or (equity_pts[-1].equity if equity_pts else initial_cash)
     )

@@ -116,6 +116,22 @@ def test_multi_symbol_backtest():
     assert result["metrics"]["total_trades"] > 0
 
 
+def test_multi_symbol_portfolio_weight_normalization():
+    """When gross target weight > 1, scale down so both symbols get fills."""
+    bars_btc = [[900_000 * i, 100.0, 101.0, 99.0, 100.0, 10.0] for i in range(12)]
+    bars_eth = [[900_000 * i, 10.0, 10.1, 9.9, 10.0, 100.0] for i in range(12)]
+
+    def signal(sym, window, pos, cap):
+        return 1.0
+
+    engine = PerpEngine({"initial_cash": 10_000, "leverage": 2.0})
+    engine.run({"BTC/USDT": bars_btc, "ETH/USDT": bars_eth}, signal)
+
+    syms_traded = {t.symbol for t in engine.trades}
+    assert "BTC/USDT" in syms_traded
+    assert "ETH/USDT" in syms_traded
+
+
 def test_ohlcv_window_grows_per_step():
     """Regression: signal_fn receives only *completed* bars (no look-ahead).
 

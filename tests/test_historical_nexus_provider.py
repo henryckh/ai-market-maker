@@ -106,7 +106,9 @@ def _bars(n: int = 40, *, start: float = 100.0, drift: float = -0.01) -> list[li
     return rows
 
 
-def test_resolve_provider_picks_historical_in_backtest():
+def test_resolve_provider_picks_historical_in_backtest(monkeypatch):
+    monkeypatch.delenv("DATALAYER_API_URL", raising=False)
+    monkeypatch.setenv("NEXUS_PROVIDER_MODE", "local")
     p = resolve_nexus_provider(run_mode="backtest")
     assert p.name == "historical"
     live = resolve_nexus_provider(run_mode="paper")

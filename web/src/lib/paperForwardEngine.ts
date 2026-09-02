@@ -71,7 +71,7 @@ export function simulateForward(
 ): { state: ForwardPaperState; newTrades: PaperTrade[] } {
   const config: StrategyConfig = strategy.config as any;
   const feeRate = (config.fee_bps ?? 5) / 10_000;
-  const cash = config.initial_cash ?? 10_000;
+  const cash = config.initial_cash ?? 100_000;
   const agentCount = config.agent_ids.length || 1;
 
   // Load existing state

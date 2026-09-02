@@ -12,7 +12,7 @@ Config keys (all plain dict, no env vars):
   taker_rate=0.0005
   slippage=0.0005
   funding_rate=0.0001
-  initial_cash=10000
+  initial_cash=100000
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ class PerpEngine:
 
     def __init__(self, config: dict[str, Any] | None = None):
         cfg = config or {}
-        self.initial_cash: float = float(cfg.get("initial_cash", 10_000))
+        self.initial_cash: float = float(cfg.get("initial_cash", 100_000))
         self.leverage: float = float(cfg.get("leverage", 1.0))
         self.maker_rate: float = float(cfg.get("maker_rate", 0.0002))
         self.taker_rate: float = float(cfg.get("taker_rate", 0.0005))

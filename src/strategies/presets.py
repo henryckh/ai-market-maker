@@ -28,7 +28,7 @@ class StrategyPreset:
     max_steps: int = 200
     seed: int = 1
     fee_bps: float = 10.0
-    initial_cash: float = 10_000.0
+    initial_cash: float = 100_000.0
     #: Suggested lookback days when the UI opens a date range.
     lookback_days: int = 60
     #: Optional multi-symbol demo basket (comma-separated). Empty = single ticker UI.

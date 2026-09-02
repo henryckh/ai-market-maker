@@ -25,6 +25,26 @@ from .perp_engine_runner import run_perp_backtest
 logger = logging.getLogger(__name__)
 
 
+def _normalize_tp_sl_to_engine_pct(raw: Any) -> float:
+    """Map deploy fractions (0.025) or engine percents (2.5) → engine percent units.
+
+    The perp TP/SL path treats values as percent points (``2.5`` → 2.5% stop).
+    Deploy JSON and fund policy store fractions (``0.025``). Values in ``(0, 1]``
+    are treated as fractions; values ``> 1`` are already percent.
+    """
+    if raw is None:
+        return 0.0
+    try:
+        x = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if x <= 0:
+        return 0.0
+    if x <= 1.0:
+        return x * 100.0
+    return x
+
+
 @dataclass
 class BacktestConfig:
     """Backward-compatible config dataclass (perp only).
@@ -32,7 +52,7 @@ class BacktestConfig:
     Maps to PerpEngine dict config internally.
     """
 
-    initial_cash_usd: float = 10_000.0
+    initial_cash_usd: float = 100_000.0
     initial_btc: float = 0.0
     fee_bps: float = 10.0
     slippage_bps: float = 5.0
@@ -151,16 +171,32 @@ class BacktestEngine:
         bar_count = max(len(rows) for rows in bars_by_symbol.values())
         eval_steps = int(c.get("eval_steps") or max(2, bar_count - ta_warmup))
 
-        # Extract TP/SL from deploy JSON execution block (if not already set at top level)
+        # Extract TP/SL. Prefer explicit engine_cfg values (including 0 = disabled).
+        # Deploy stores fractions (0.025 = 2.5%); engine expects percent units (2.5).
         _deploy = c.get("deploy_config") if isinstance(c.get("deploy_config"), dict) else {}
         _exec = _deploy.get("execution") if isinstance(_deploy.get("execution"), dict) else {}
-        tp = float(c.get("take_profit_pct") or _exec.get("take_profit_pct") or 0.0)
-        sl = float(c.get("stop_loss_pct") or _exec.get("stop_loss_pct") or 0.0)
+        if "take_profit_pct" in c:
+            tp = _normalize_tp_sl_to_engine_pct(c.get("take_profit_pct"))
+        else:
+            tp = _normalize_tp_sl_to_engine_pct(_exec.get("take_profit_pct"))
+        if "stop_loss_pct" in c:
+            sl = _normalize_tp_sl_to_engine_pct(c.get("stop_loss_pct"))
+        else:
+            sl = _normalize_tp_sl_to_engine_pct(_exec.get("stop_loss_pct"))
         lev = float(c.get("leverage") or _exec.get("leverage") or fp.max_leverage)
         slip_bps = float(c.get("slippage_bps") or _exec.get("slippage_bps") or 5.0)
+        cooldown = int(
+            c.get("trade_cooldown_bars")
+            if c.get("trade_cooldown_bars") is not None
+            else (
+                _exec.get("trade_cooldown_bars")
+                if _exec.get("trade_cooldown_bars") is not None
+                else fp.trade_cooldown_bars
+            )
+        )
 
         perp_cfg = {
-            "initial_cash": float(c.get("initial_cash_usd", 10_000)),
+            "initial_cash": float(c.get("initial_cash_usd", 100_000)),
             "leverage": lev,
             "taker_rate": float(c.get("fee_bps", 10.0)) / 10_000,
             "maker_rate": float(c.get("fee_bps", 10.0)) / 10_000,
@@ -170,7 +206,7 @@ class BacktestEngine:
             "take_profit_pct": tp,
             "stop_loss_pct": sl,
             "max_hold_bars": int(c.get("max_hold_bars", 0)),
-            "trade_cooldown_bars": int(c.get("trade_cooldown_bars", fp.trade_cooldown_bars)),
+            "trade_cooldown_bars": max(0, cooldown),
             "timeframe": str(c.get("timeframe", "")),
             "eval_start_bar": ta_warmup,
         }

@@ -386,9 +386,19 @@ def get_macro(args: dict[str, Any], *, api_key: str) -> dict[str, Any]:
         "all_chain_tvl_usd",
         "onchain_liquidity_score",
     )
+    macro = {k: overview.get(k) for k in keys if overview.get(k) is not None}
+    if "us_10y_yield_pct" not in macro:
+        rates = overview.get("treasury_rates")
+        if (
+            isinstance(rates, list)
+            and rates
+            and isinstance(rates[0], dict)
+            and rates[0].get("year10") is not None
+        ):
+            macro["us_10y_yield_pct"] = rates[0]["year10"]
     return {
         "as_of_date": data.get("as_of_date"),
-        "macro": {k: overview.get(k) for k in keys if overview.get(k) is not None},
+        "macro": macro,
     }
 
 

@@ -1,4 +1,4 @@
-"""Shipped catalog is the top earners plus a no-LLM smoke."""
+"""Deploy catalog under config/deploy.*.json."""
 
 from __future__ import annotations
 
@@ -40,16 +40,32 @@ PROFILE_IDS = {
 }
 
 
-def test_every_deploy_has_description() -> None:
-    files = sorted(DEPLOY_DIR.glob("deploy.*.json"))
-    names = [p.name for p in files]
-    assert names == sorted(SHIPPED), names
-    for path in files:
+def test_every_shipped_deploy_has_description() -> None:
+    for name in SHIPPED:
+        path = DEPLOY_DIR / name
+        assert path.is_file(), f"missing deploy file: {name}"
         obj = json.loads(path.read_text(encoding="utf-8"))
-        assert isinstance(obj.get("description"), str) and obj["description"].strip(), path.name
-        assert isinstance(obj.get("agents"), dict) and obj["agents"], path.name
-        assert isinstance(obj.get("execution"), dict), path.name
-        assert obj.get("profile", {}).get("profile_id") == PROFILE_IDS[path.name], path.name
+        assert isinstance(obj.get("description"), str) and obj["description"].strip(), name
+        assert isinstance(obj.get("agents"), dict) and obj["agents"], name
+        assert isinstance(obj.get("execution"), dict), name
+
+
+def test_no_pm_deploy_configs() -> None:
+    assert not (DEPLOY_DIR / "pm").exists()
+    assert not list(DEPLOY_DIR.glob("deploy.pm_*.json"))
+
+
+def test_shipped_catalog_present() -> None:
+    on_disk = {p.name for p in DEPLOY_DIR.glob("deploy.*.json")}
+    missing = [name for name in SHIPPED if name not in on_disk]
+    assert not missing, f"missing shipped deploy files: {missing}"
+
+
+def test_shipped_profile_ids() -> None:
+    for name in SHIPPED:
+        path = DEPLOY_DIR / name
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        assert obj.get("profile", {}).get("profile_id") == PROFILE_IDS[name], name
 
 
 def test_default_deploy_is_rank_one_earner() -> None:

@@ -31,6 +31,8 @@ class RemoteNexusProvider:
     """
 
     name = "remote_historical"
+    _bundle_cache: dict[str, dict[str, Any]] = {}
+    _bundle_cache_max = 512
 
     def __init__(self, *, base_url: str | None = None):
         self._base_url = base_url or os.getenv("DATALAYER_API_URL", "http://localhost:3001")
@@ -47,27 +49,52 @@ class RemoteNexusProvider:
             }
 
         url = f"{self._base_url}{path}"
-        try:
-            resp = requests.get(url, params=params, timeout=self._timeout_s)
-            resp.raise_for_status()
-            body = resp.json()
-            if not isinstance(body, dict):
+        last_err: str = "request_failed"
+        for attempt in range(10):
+            try:
+                resp = requests.get(url, params=params, timeout=self._timeout_s)
+                if resp.status_code == 429:
+                    # Keep Nexus ON — honor Retry-After when present.
+                    last_err = "HTTP 429 rate_limit"
+                    retry_after = resp.headers.get("Retry-After")
+                    try:
+                        wait = float(retry_after) if retry_after else min(30.0, 0.5 * (2**attempt))
+                    except ValueError:
+                        wait = min(30.0, 0.5 * (2**attempt))
+                    wait = max(0.5, min(60.0, wait))
+                    logger.info(
+                        "RemoteNexusProvider: 429 on %s — sleep %.1fs (attempt %s/10)",
+                        path,
+                        wait,
+                        attempt + 1,
+                    )
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                body = resp.json()
+                if not isinstance(body, dict):
+                    return {
+                        "error": "invalid_response",
+                        "endpoints": {},
+                        "per_symbol": {"by_symbol": {}, "errors": []},
+                    }
+                data = body.get("data")
+                if isinstance(data, dict):
+                    return data
                 return {
-                    "error": "invalid_response",
+                    "error": "no_data",
                     "endpoints": {},
                     "per_symbol": {"by_symbol": {}, "errors": []},
                 }
-            data = body.get("data")
-            if isinstance(data, dict):
-                return data
-            return {
-                "error": "no_data",
-                "endpoints": {},
-                "per_symbol": {"by_symbol": {}, "errors": []},
-            }
-        except Exception as e:
-            logger.warning("RemoteNexusProvider: %s failed: %s", path, e)
-            return {"error": str(e), "endpoints": {}, "per_symbol": {"by_symbol": {}, "errors": []}}
+            except Exception as e:
+                last_err = f"{type(e).__name__}: {e}"
+                time.sleep(min(8.0, 0.3 * (2**attempt)))
+        logger.warning("RemoteNexusProvider: %s failed after retries: %s", path, last_err)
+        return {
+            "error": last_err,
+            "endpoints": {},
+            "per_symbol": {"by_symbol": {}, "errors": []},
+        }
 
     def get_bundle(
         self,
@@ -81,9 +108,17 @@ class RemoteNexusProvider:
         ts = int(as_of_ms) if as_of_ms is not None else int(time.time() * 1000)
         day = ms_to_utc_date(ts)
 
-        params: dict[str, Any] = {"as_of": day}
         primary_sym = primary or (universe[0] if universe else "BTC/USDT")
-        params["primary"] = primary_sym
+        uni_key = ",".join(universe) if universe else primary_sym
+        cache_key = f"{day}|{primary_sym}|{uni_key}"
+        cached = self._bundle_cache.get(cache_key)
+        if cached is not None:
+            out = dict(cached)
+            out["as_of_ms"] = ts
+            out["fetched_at_epoch"] = time.time()
+            return out
+
+        params: dict[str, Any] = {"as_of": day, "primary": primary_sym}
         if universe:
             params["universe"] = ",".join(universe)
 
@@ -105,6 +140,11 @@ class RemoteNexusProvider:
         data.setdefault("as_of_ms", ts)
         data.setdefault("as_of_date", day)
         data.setdefault("fetched_at_epoch", time.time())
+
+        if len(self._bundle_cache) >= self._bundle_cache_max:
+            # Drop an arbitrary old entry (FIFO-ish via insert order on 3.7+)
+            self._bundle_cache.pop(next(iter(self._bundle_cache)))
+        self._bundle_cache[cache_key] = dict(data)
 
         return data
 

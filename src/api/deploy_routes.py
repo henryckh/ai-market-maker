@@ -65,7 +65,7 @@ class AgentNodeConfig(BaseModel):
 class PolicyConfig(BaseModel):
     """Config UI policy knobs (subset deployed to disk)."""
 
-    portfolio_budget_usd: float = 10000
+    portfolio_budget_usd: float = 100_000
     stop_loss_pct: float = 0.025
     take_profit_pct: float = 0.06
     max_leverage: float = 2.0

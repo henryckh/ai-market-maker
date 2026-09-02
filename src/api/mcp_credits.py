@@ -1,10 +1,10 @@
 """Optional MCP credit check + deduct against aimm-web-api.
 
 Gated by Flow env ``MCP_CREDITS_ENABLED`` (default off). When on, ``run_backtest``
-reserves credits from the Profile nxk_ ledger in aimm-web Mongo before enqueue.
+reserves credits from the Profile nxk_ ledger (same Mongo as aimm-web) before enqueue.
 
 Requires:
-* ``AIMM_WEB_API_URL`` — aimm-web-api origin (e.g. http://web-api:3002)
+* ``WEB_API_URL`` — aimm-web-api origin (compose sets http://web-api:3002; not a frontend URL)
 * ``AIMM_API_KEY`` — must equal web-api ``FLOW_API_KEY`` (sent as X-Flow-Key)
 * caller ``X-API-KEY`` — the bound Profile nxk_ key
 """
@@ -52,11 +52,7 @@ def mcp_credits_enabled() -> bool:
 
 
 def web_api_base_url() -> str:
-    raw = (
-        (os.getenv("AIMM_WEB_API_URL") or os.getenv("AIMM_WEB_API_BASE_URL") or "")
-        .strip()
-        .rstrip("/")
-    )
+    raw = (os.getenv("WEB_API_URL") or "").strip().rstrip("/")
     if raw.endswith("/api"):
         raw = raw[: -len("/api")].rstrip("/")
     return raw
@@ -72,7 +68,7 @@ def _post(path: str, binding: McpBinding, body: dict[str, Any]) -> dict[str, Any
         raise McpCreditsError(
             503,
             "credits_unconfigured",
-            "MCP_CREDITS_ENABLED requires AIMM_WEB_API_URL (aimm-web-api origin).",
+            "MCP_CREDITS_ENABLED requires WEB_API_URL (aimm-web-api origin, not the aimm-web frontend).",
         )
     service_key = _flow_service_key()
     if not service_key:

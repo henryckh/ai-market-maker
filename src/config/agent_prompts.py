@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -145,16 +146,69 @@ def upsert_agent_prompt_setting(
 
 
 def prompt_settings_by_actor(*, path: Path | None = None) -> dict[str, AgentPromptSettings]:
-    """Convenience lookup: actor_id -> settings (first wins)."""
+    """Convenience lookup: actor_id -> settings (file first, inline overlay wins)."""
     out: dict[str, AgentPromptSettings] = {}
     for r in load_agent_prompt_settings(path):
         out.setdefault(r.actor_id, r)
+    inline = _inline_prompt_overrides.get()
+    if inline:
+        for r in inline:
+            out[r.actor_id] = r
     return out
+
+
+_INLINE_MAX_PROMPT_CHARS = 4000
+
+_inline_prompt_overrides: ContextVar[list[AgentPromptSettings] | None] = ContextVar(
+    "inline_agent_prompt_overrides",
+    default=None,
+)
+
+
+def parse_inline_prompt_rows(raw: Any) -> list[AgentPromptSettings]:
+    """Parse deploy.agent_prompts list from Strategy Builder inline deploy."""
+    if not isinstance(raw, list):
+        return []
+    out: list[AgentPromptSettings] = []
+    for row in raw:
+        ps = _coerce_row(row)
+        if ps is not None:
+            out.append(ps)
+    return out
+
+
+def apply_inline_prompt_overrides(rows: list[AgentPromptSettings]) -> Token:
+    """Overlay builder prompts for the current backtest / desk tick context."""
+    trimmed: list[AgentPromptSettings] = []
+    for r in rows:
+        sys_p = r.system_prompt[:_INLINE_MAX_PROMPT_CHARS]
+        task_p = r.task_prompt[:_INLINE_MAX_PROMPT_CHARS]
+        trimmed.append(
+            AgentPromptSettings(
+                node_id=r.node_id,
+                actor_id=r.actor_id,
+                system_prompt=sys_p,
+                task_prompt=task_p,
+                cot_enabled=r.cot_enabled,
+                model=r.model,
+                temperature=r.temperature,
+                max_tokens=r.max_tokens,
+                tools=r.tools,
+            )
+        )
+    return _inline_prompt_overrides.set(trimmed or None)
+
+
+def clear_inline_prompt_overrides(token: Token) -> None:
+    _inline_prompt_overrides.reset(token)
 
 
 __all__ = [
     "AgentPromptSettings",
+    "apply_inline_prompt_overrides",
+    "clear_inline_prompt_overrides",
     "load_agent_prompt_settings",
+    "parse_inline_prompt_rows",
     "prompt_settings_by_actor",
     "save_agent_prompt_settings",
     "upsert_agent_prompt_setting",

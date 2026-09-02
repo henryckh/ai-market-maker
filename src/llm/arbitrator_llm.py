@@ -4,9 +4,10 @@ import json
 import os
 from typing import Any, Dict
 
-from config.agent_prompts import AgentPromptSettings, prompt_settings_by_actor
+from config.agent_prompts import prompt_settings_by_actor
 from llm.json_parse import parse_json_object
 from llm.openai_client import run_tool_calling_chat
+from llm.prompt_overlay import merge_operator_prompt as merge_operator_arbitrator_prompt
 from llm.structured_output import (
     clamp_int,
     llm_output_retries,
@@ -28,18 +29,6 @@ from workflow.tier2_context import (
     compute_legacy_arbitrator_scores,
     legacy_deterministic_stance_preview,
 )
-
-
-def merge_operator_arbitrator_prompt(engineered: str, ps: AgentPromptSettings | None) -> str:
-    """Keep engineered arbitrator rules; append operator JSON as overlay."""
-    system = engineered
-    if ps is None:
-        return system
-    if ps.system_prompt.strip():
-        system = system.rstrip() + "\n\nOperator policy:\n" + ps.system_prompt.strip()
-    if ps.task_prompt.strip():
-        system = system.rstrip() + "\n\nOperator task prompt:\n" + ps.task_prompt.strip()
-    return system
 
 
 def _reasoning_entry(
@@ -238,6 +227,11 @@ def signal_arbitrator_llm(state: HedgeFundState) -> Dict[str, Any]:
         "Churn guard (important): This backtest sim is sensitive to flip-flopping because it can generate many small "
         "adds/exits with fees. Prefer **neutral** with confidence < 0.55 when evidence is mixed or weak. Only switch "
         'from bullish↔bearish when the pro/con evidence changes materially. If you are unsure, do not "force action".\n'
+        "Trading journey (continuity): shared_memory.trading_journey is a compressed log of recent actions/stances. "
+        "Treat an open swing as sticky: keep the same directional stance until invalidation (regime flip, risk, or "
+        "clear opposing evidence). Do not re-open a fresh debate from zero each bar.\n"
+        "Price regime: shared_memory.price_regime is a coarse SMA trend (up/down/flat/unknown). Prefer holding longs "
+        "in up regimes and avoid new longs in down regimes unless conviction is high.\n"
         "Stablecoin sanity: If the universe contains stable/stable-ish pairs (e.g. USDC/USDT, USD1/USDT), do not let "
         "them drive an aggressive bullish/bearish stance; they are low-vol and mostly noise. Focus on the primary "
         "ticker and the non-stable high-beta legs for directional thesis.\n"
@@ -274,6 +268,7 @@ def signal_arbitrator_llm(state: HedgeFundState) -> Dict[str, Any]:
     # Operator JSON is a policy overlay. Do not wipe the engineered rules above.
     ps = prompt_settings_by_actor().get("signal_arbitrator")
     system = merge_operator_arbitrator_prompt(system, ps)
+    sm = state.get("shared_memory") if isinstance(state.get("shared_memory"), dict) else {}
     uni = state.get("universe")
     universe_out = [str(x) for x in uni] if isinstance(uni, list) and uni else [ticker]
     user = json.dumps(
@@ -282,6 +277,8 @@ def signal_arbitrator_llm(state: HedgeFundState) -> Dict[str, Any]:
             "universe": universe_out,
             "debate_transcript": transcript,
             "backtest_prompt_context": _backtest_prompt_context(state, ticker=ticker),
+            "trading_journey": sm.get("trading_journey") or [],
+            "price_regime": sm.get("price_regime") or "unknown",
             "deterministic_reference": deterministic_reference,
             "tier0_bull_hooks": bull_hooks,
             "tier0_bear_hooks": bear_hooks,

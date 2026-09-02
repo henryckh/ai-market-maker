@@ -15,8 +15,10 @@ from typing import Any
 
 from openai import OpenAI
 
+from config.agent_prompts import prompt_settings_by_actor
 from config.llm_env import resolve_llm_config
 from llm.json_parse import parse_json_object
+from llm.prompt_overlay import merge_operator_prompt
 
 # Lazy-loaded decision cache
 _DECISION_CACHE: Any = None
@@ -498,6 +500,9 @@ def _build_agent_prompt(
         "- Every field is required. If you have no strong opinion, use the neutral default shown above.\n"
         '- Add a "reasoning" field (string, <= 400 chars) explaining your key signal adjustments.\n'
     )
+
+    ps = prompt_settings_by_actor().get(agent_id)
+    system = merge_operator_prompt(system, ps)
 
     user = f"## Current Market Data\n{market_context}\n\nProduce your structured signal now."
 

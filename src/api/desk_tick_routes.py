@@ -68,6 +68,14 @@ def post_desk_tick(req: DeskTickRequest) -> dict[str, Any]:
     deploy_path = write_tenant_deploy(deploy=req.deploy, run_id=rid, user_id=req.user_id or "anon")
 
     reset_usage()
+    from config.agent_prompts import (
+        apply_inline_prompt_overrides,
+        clear_inline_prompt_overrides,
+        parse_inline_prompt_rows,
+    )
+
+    prompt_rows = parse_inline_prompt_rows(req.deploy.get("agent_prompts"))
+    prompt_token = apply_inline_prompt_overrides(prompt_rows) if prompt_rows else None
     try:
         from config.deploy_loader import (
             get_arbitrator_llm,
@@ -93,6 +101,9 @@ def post_desk_tick(req: DeskTickRequest) -> dict[str, Any]:
     except Exception as e:
         logger.exception("desk tick failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        if prompt_token is not None:
+            clear_inline_prompt_overrides(prompt_token)
 
     if not isinstance(result, dict):
         result = {}

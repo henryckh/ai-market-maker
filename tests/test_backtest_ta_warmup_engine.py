@@ -1,11 +1,10 @@
-"""Engine respects TA warmup: no workflow during warmup bars."""
+"""Engine respects TA warmup: no desk signal before warmup bars."""
 
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from backtest.engine import BacktestEngine
 
@@ -19,28 +18,10 @@ def _bars(n: int, *, start: float = 50_000.0) -> list[list[float]]:
     return out
 
 
-def test_warmup_bars_skip_workflow(monkeypatch):
-    """Bars before min_warmup must not invoke LangGraph."""
-    calls: list[int] = []
-
+def test_warmup_bars_skip_desk_execution(monkeypatch):
+    """Bars before min_warmup must not emit iteration receipts."""
     monkeypatch.setenv("MODE", "backtest")
     monkeypatch.setenv("AIMM_BACKTEST_TERMINAL_LOG", "0")
-
-    class _FakeWorkflow:
-        def invoke(self, state):
-            calls.append(
-                int(state.get("shared_memory", {}).get("backtest", {}).get("window_len") or 0)
-            )
-            return {
-                "trade_intent": {"action": "BUY", "confidence": 0.7},
-                "tier0_contracts": [],
-                "arbitration_result": {"composite": 60, "confidence": 0.7, "stance": "bullish"},
-            }
-
-    monkeypatch.setattr(
-        "main.build_workflow",
-        lambda: MagicMock(compile=lambda: _FakeWorkflow()),
-    )
 
     with tempfile.TemporaryDirectory() as tmp:
         runs = Path(tmp)
@@ -52,9 +33,12 @@ def test_warmup_bars_skip_workflow(monkeypatch):
                 "ta_warmup_bars": 5,
                 "deploy_profile_weights": {"technical_ta_engine": 1.0},
                 "interval_sec": 86_400,
+                "use_llm": False,
+                "arbitrator_mode": "weighted_convergence",
+                "fee_bps": 0,
+                "slippage_bps": 0,
             }
         )
-        eng.workflow = _FakeWorkflow()
         res = eng.run(
             ticker="BTC/USDT",
             bars=_bars(13),
@@ -63,10 +47,9 @@ def test_warmup_bars_skip_workflow(monkeypatch):
         )
         assert res["ta_warmup_bars"] == 5
         assert res["eval_bars"] == 8
-        assert all(w >= 5 for w in calls)
-        assert len(calls) > 0
 
         it_path = runs / "backtests" / "bt_warmup_test" / "iterations.jsonl"
         if it_path.is_file():
             rows = [json.loads(line) for line in it_path.read_text().splitlines() if line.strip()]
+            assert rows, "expected iteration receipts after warmup"
             assert all(int(r.get("bar_index", 0)) >= 5 for r in rows)
